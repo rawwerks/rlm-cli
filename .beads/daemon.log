@@ -1,0 +1,6 @@
+time=2026-01-21T15:26:12.394-05:00 level=INFO msg="Daemon started (interval: %v, auto-commit: %v, auto-push: %v)" !BADKEY=5s !BADKEY=false !BADKEY=false
+time=2026-01-21T15:26:12.394-05:00 level=INFO msg="using database" path=/home/raw/Documents/GitHub/rlm-cli/.beads/beads.db
+time=2026-01-21T15:26:12.424-05:00 level=ERROR msg="cannot open database" error="post-migration validation failed: migration invariants failed:\n  - required_config_present: required config key missing: issue_prefix (database has 45 issues)"
+time=2026-01-21T15:27:01.146-05:00 level=INFO msg="Daemon started (interval: %v, auto-commit: %v, auto-push: %v)" !BADKEY=5s !BADKEY=false !BADKEY=false
+time=2026-01-21T15:27:01.148-05:00 level=INFO msg="using database" path=/home/raw/Documents/GitHub/rlm-cli/.beads/beads.db
+time=2026-01-21T15:27:01.191-05:00 level=ERROR msg="cannot open database" error="post-migration validation failed: migration invariants failed:\n  - required_config_present: required config key missing: issue_prefix (database has 45 issues)"
