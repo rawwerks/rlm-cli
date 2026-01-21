@@ -3,8 +3,71 @@
 from __future__ import annotations
 
 import importlib.metadata
+import json
+import time
+from pathlib import Path
+from typing import Any, Iterable
 
 import typer
+
+from .config import DEFAULT_CONFIG, load_effective_config, render_effective_config_text
+from .context import WalkOptions, build_context_from_sources
+from .errors import CliError, CliUsageError, format_error_json, format_error_text
+from .inputs import parse_inputs
+from .output import (
+    attach_captured_stdout,
+    build_output,
+    capture_stdout,
+    emit_json,
+    emit_text,
+)
+from .rlm_adapter import parse_json_args, parse_kv_args, run_completion
+
+DEFAULT_EXTENSIONS = [
+    ".py",
+    ".ts",
+    ".js",
+    ".jsx",
+    ".tsx",
+    ".java",
+    ".go",
+    ".rs",
+    ".cpp",
+    ".c",
+    ".h",
+    ".md",
+    ".txt",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".toml",
+]
+
+DEFAULT_MAX_FILE_BYTES = 1_000_000
+DEFAULT_MAX_TOTAL_BYTES = 50_000_000
+
+APP_EPILOG = """\
+Examples:
+  rlm ask . -q "Find the entrypoint and explain config loading"
+  rlm ask rlm/core/rlm.py -q "Summarize constructor params" --json
+  git diff | rlm ask - -q "Review this diff" --json
+  rlm complete "Write a commit message" --json
+
+Precedence: CLI flags > environment > config > defaults.
+"""
+
+ASK_EPILOG = """\
+Input modes:
+  - paths (files/dirs), '-' for stdin, or literals with --literal.
+  - use --path to force filesystem interpretation.
+"""
+
+app = typer.Typer(
+    add_completion=False,
+    help="Run RLM completions with optional context.",
+    epilog=APP_EPILOG,
+    no_args_is_help=True,
+)
 
 
 def _version_text() -> str:
@@ -19,13 +82,6 @@ def _version_callback(value: bool) -> None:
         return
     typer.echo(_version_text())
     raise typer.Exit(code=0)
-
-
-app = typer.Typer(
-    add_completion=False,
-    help="RLM CLI.",
-    no_args_is_help=True,
-)
 
 
 @app.callback()
@@ -47,31 +103,834 @@ def main(
     ctx.obj = {"json": json_output, "version": version}
 
 
-def _not_implemented(name: str) -> None:
-    typer.echo(f"{name} not implemented yet.", err=True)
-    raise typer.Exit(code=1)
-
-
-@app.command(help="Ask the RLM backend with optional context.")
-def ask(ctx: typer.Context) -> None:
-    _not_implemented("ask")
+@app.command(help="Ask the RLM backend with optional context.", epilog=ASK_EPILOG)
+def ask(
+    ctx: typer.Context,
+    inputs: list[str] = typer.Argument(
+        None,
+        help="Files, directories, '-' for stdin, or text with --literal.",
+    ),
+    question: str = typer.Option(
+        ...,
+        "-q",
+        "--question",
+        help="Root question or instruction.",
+    ),
+    backend: str | None = typer.Option(None, help="Backend provider name."),
+    model: str | None = typer.Option(None, help="Model override (backend-specific)."),
+    environment: str | None = typer.Option(None, help="Execution environment."),
+    max_iterations: int | None = typer.Option(None, help="Maximum iterations."),
+    max_depth: int | None = typer.Option(None, help="Maximum depth."),
+    verbose: bool = typer.Option(False, help="Enable verbose logging."),
+    quiet: bool = typer.Option(False, help="Suppress non-error logs."),
+    config: str | None = typer.Option(None, help="Path to YAML config file."),
+    output_format: str | None = typer.Option(
+        None,
+        "--output-format",
+        help="Output format: text or json.",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Output machine-readable JSON.",
+    ),
+    output: str | None = typer.Option(None, help="Write output to file."),
+    log_dir: str | None = typer.Option(None, help="Enable RLM logging."),
+    dir_mode: str | None = typer.Option(
+        None,
+        help="Directory mode: docs (structured) or files (raw).",
+    ),
+    extensions: list[str] = typer.Option(
+        None,
+        "--extensions",
+        help="File extensions (repeat or comma-separated).",
+    ),
+    include: list[str] = typer.Option(
+        (),
+        "--include",
+        help="Include glob patterns.",
+    ),
+    exclude: list[str] = typer.Option(
+        (),
+        "--exclude",
+        help="Exclude glob patterns.",
+    ),
+    respect_gitignore: bool | None = typer.Option(
+        None,
+        "--respect-gitignore/--no-respect-gitignore",
+        help="Respect .gitignore when present.",
+    ),
+    max_file_bytes: int | None = typer.Option(
+        None,
+        help="Maximum bytes per file.",
+    ),
+    max_total_bytes: int | None = typer.Option(
+        None,
+        help="Maximum total bytes across files.",
+    ),
+    encoding: str | None = typer.Option(None, help="File encoding."),
+    binary: str | None = typer.Option(None, help="Binary handling: skip or error."),
+    hidden: bool | None = typer.Option(
+        None,
+        "--hidden/--no-hidden",
+        help="Include hidden files.",
+    ),
+    follow_symlinks: bool | None = typer.Option(
+        None,
+        "--follow-symlinks/--no-follow-symlinks",
+        help="Follow symlinks when walking directories.",
+    ),
+    backend_arg: list[str] = typer.Option(
+        (),
+        "--backend-arg",
+        help="Backend KEY=VALUE arguments.",
+    ),
+    env_arg: list[str] = typer.Option(
+        (),
+        "--env-arg",
+        help="Environment KEY=VALUE arguments.",
+    ),
+    rlm_arg: list[str] = typer.Option(
+        (),
+        "--rlm-arg",
+        help="RLM KEY=VALUE arguments.",
+    ),
+    backend_json: list[str] = typer.Option(
+        (),
+        "--backend-json",
+        help="Backend JSON file (prefix with @).",
+    ),
+    env_json: list[str] = typer.Option(
+        (),
+        "--env-json",
+        help="Environment JSON file (prefix with @).",
+    ),
+    rlm_json: list[str] = typer.Option(
+        (),
+        "--rlm-json",
+        help="RLM JSON file (prefix with @).",
+    ),
+    literal: bool = typer.Option(
+        False,
+        "--literal",
+        help="Treat inputs as literal text.",
+    ),
+    path: bool = typer.Option(
+        False,
+        "--path",
+        help="Treat inputs as filesystem paths.",
+    ),
+    print_effective_config: bool = typer.Option(
+        False,
+        "--print-effective-config",
+        help="Print merged config for debugging.",
+    ),
+) -> None:
+    _run_ask(
+        ctx,
+        inputs,
+        question,
+        backend,
+        model,
+        environment,
+        max_iterations,
+        max_depth,
+        verbose,
+        quiet,
+        config,
+        output_format,
+        json_output,
+        output,
+        log_dir,
+        dir_mode,
+        extensions,
+        include,
+        exclude,
+        respect_gitignore,
+        max_file_bytes,
+        max_total_bytes,
+        encoding,
+        binary,
+        hidden,
+        follow_symlinks,
+        backend_arg,
+        env_arg,
+        rlm_arg,
+        backend_json,
+        env_json,
+        rlm_json,
+        literal,
+        path,
+        print_effective_config,
+    )
 
 
 @app.command(help="Complete a prompt without extra context.")
-def complete(ctx: typer.Context) -> None:
-    _not_implemented("complete")
+def complete(
+    ctx: typer.Context,
+    text: str = typer.Argument(..., help="Prompt text."),
+    backend: str | None = typer.Option(None, help="Backend provider name."),
+    model: str | None = typer.Option(None, help="Model override (backend-specific)."),
+    environment: str | None = typer.Option(None, help="Execution environment."),
+    max_iterations: int | None = typer.Option(None, help="Maximum iterations."),
+    max_depth: int | None = typer.Option(None, help="Maximum depth."),
+    verbose: bool = typer.Option(False, help="Enable verbose logging."),
+    quiet: bool = typer.Option(False, help="Suppress non-error logs."),
+    config: str | None = typer.Option(None, help="Path to YAML config file."),
+    output_format: str | None = typer.Option(
+        None,
+        "--output-format",
+        help="Output format: text or json.",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Output machine-readable JSON.",
+    ),
+    output: str | None = typer.Option(None, help="Write output to file."),
+    log_dir: str | None = typer.Option(None, help="Enable RLM logging."),
+    backend_arg: list[str] = typer.Option(
+        (),
+        "--backend-arg",
+        help="Backend KEY=VALUE arguments.",
+    ),
+    env_arg: list[str] = typer.Option(
+        (),
+        "--env-arg",
+        help="Environment KEY=VALUE arguments.",
+    ),
+    rlm_arg: list[str] = typer.Option(
+        (),
+        "--rlm-arg",
+        help="RLM KEY=VALUE arguments.",
+    ),
+    backend_json: list[str] = typer.Option(
+        (),
+        "--backend-json",
+        help="Backend JSON file (prefix with @).",
+    ),
+    env_json: list[str] = typer.Option(
+        (),
+        "--env-json",
+        help="Environment JSON file (prefix with @).",
+    ),
+    rlm_json: list[str] = typer.Option(
+        (),
+        "--rlm-json",
+        help="RLM JSON file (prefix with @).",
+    ),
+    print_effective_config: bool = typer.Option(
+        False,
+        "--print-effective-config",
+        help="Print merged config for debugging.",
+    ),
+) -> None:
+    _run_complete(
+        ctx,
+        text,
+        backend,
+        model,
+        environment,
+        max_iterations,
+        max_depth,
+        verbose,
+        quiet,
+        config,
+        output_format,
+        json_output,
+        output,
+        log_dir,
+        backend_arg,
+        env_arg,
+        rlm_arg,
+        backend_json,
+        env_json,
+        rlm_json,
+        print_effective_config,
+    )
 
 
 @app.command(help="Run diagnostics on configuration and environment.")
-def doctor(ctx: typer.Context) -> None:
-    _not_implemented("doctor")
+def doctor(
+    ctx: typer.Context,
+    json_output: bool = typer.Option(False, "--json", help="Output JSON diagnostics."),
+) -> None:
+    from .doctor import run_doctor
+
+    json_mode = _resolve_json_mode(ctx, None, json_output)
+    result = run_doctor(json_mode=json_mode)
+    if json_mode:
+        emit_json(result)
+    else:
+        emit_text(result["text"], warnings=result.get("warnings", []))
 
 
 @app.command(help="Print the CLI spec.")
-def spec(ctx: typer.Context) -> None:
-    _not_implemented("spec")
+def spec(ctx: typer.Context, json_output: bool = typer.Option(True, "--json")) -> None:
+    from .spec import build_spec
+
+    payload = build_spec()
+    if json_output:
+        emit_json(payload)
+    else:
+        emit_text(json.dumps(payload, indent=2, ensure_ascii=True))
 
 
 @app.command(help="Print the JSON schema for request/response.")
 def schema(ctx: typer.Context) -> None:
-    _not_implemented("schema")
+    from .schema import output_schema
+
+    emit_text(json.dumps(output_schema(), indent=2, ensure_ascii=True))
+
+
+def _run_ask(
+    ctx: typer.Context,
+    inputs: list[str],
+    question: str,
+    backend: str | None,
+    model: str | None,
+    environment: str | None,
+    max_iterations: int | None,
+    max_depth: int | None,
+    verbose: bool,
+    quiet: bool,
+    config: str | None,
+    output_format: str | None,
+    json_output: bool,
+    output: str | None,
+    log_dir: str | None,
+    dir_mode: str | None,
+    extensions: list[str] | None,
+    include: Iterable[str],
+    exclude: Iterable[str],
+    respect_gitignore: bool | None,
+    max_file_bytes: int | None,
+    max_total_bytes: int | None,
+    encoding: str | None,
+    binary: str | None,
+    hidden: bool | None,
+    follow_symlinks: bool | None,
+    backend_arg: Iterable[str],
+    env_arg: Iterable[str],
+    rlm_arg: Iterable[str],
+    backend_json: Iterable[str],
+    env_json: Iterable[str],
+    rlm_json: Iterable[str],
+    literal: bool,
+    path: bool,
+    print_effective_config: bool,
+) -> None:
+    if verbose and quiet:
+        raise CliUsageError(
+            "Cannot use --verbose and --quiet together.",
+            fix="Choose only one verbosity flag.",
+        )
+    if literal and path:
+        raise CliUsageError(
+            "Cannot use --literal and --path together.",
+            fix="Choose one input interpretation flag.",
+        )
+
+    try:
+        json_flag = _resolve_json_mode(ctx, output_format, json_output)
+        cli_overrides = _build_cli_overrides(
+            backend=backend,
+            model=model,
+            environment=environment,
+            max_iterations=max_iterations,
+            max_depth=max_depth,
+            output_format=output_format,
+            log_dir=log_dir,
+        )
+        effective = load_effective_config(
+            cli_overrides=cli_overrides,
+            cli_config_path=config,
+            defaults=DEFAULT_CONFIG,
+        )
+        output_format_final = _resolve_output_format(
+            json_flag,
+            output_format,
+            effective,
+        )
+        json_mode = output_format_final == "json"
+
+        effective_config_debug: dict[str, object] | None = None
+        if print_effective_config:
+            if json_mode:
+                effective_config_debug = dict(effective.data)
+            else:
+                _emit_effective_config(effective.data, json_mode)
+
+        sources = parse_inputs(inputs or [], literal=literal, path=path)
+        walk_opts = WalkOptions(
+            extensions=_parse_extensions(extensions),
+            include_globs=_flatten_list(include),
+            exclude_globs=_flatten_list(exclude),
+            respect_gitignore=True if respect_gitignore is None else respect_gitignore,
+            include_hidden=hidden if hidden is not None else False,
+            follow_symlinks=follow_symlinks if follow_symlinks is not None else False,
+            max_file_bytes=max_file_bytes
+            if max_file_bytes is not None
+            else DEFAULT_MAX_FILE_BYTES,
+            max_total_bytes=max_total_bytes
+            if max_total_bytes is not None
+            else DEFAULT_MAX_TOTAL_BYTES,
+            binary_policy=binary or "skip",
+            exclude_lockfiles=True,
+            encoding=encoding or "utf-8",
+        )
+        context_payload, context_result = build_context_from_sources(
+            sources,
+            options=walk_opts,
+            dir_mode=dir_mode or "docs",
+        )
+
+        context_payload_obj: object = context_payload
+        if (dir_mode or "docs") == "files":
+            context_payload_obj = [entry.content for entry in context_result.files]
+
+        backend_kwargs = parse_kv_args(backend_arg, label="--backend-arg")
+        environment_kwargs = parse_kv_args(env_arg, label="--env-arg")
+        rlm_kwargs = parse_kv_args(rlm_arg, label="--rlm-arg")
+        backend_kwargs = _merge_dicts(
+            _config_mapping(effective.data.get("backend_kwargs")),
+            backend_kwargs,
+        )
+        environment_kwargs = _merge_dicts(
+            _config_mapping(effective.data.get("environment_kwargs")),
+            environment_kwargs,
+        )
+        backend_kwargs = _merge_dicts(
+            backend_kwargs,
+            parse_json_args(backend_json, label="--backend-json"),
+        )
+        environment_kwargs = _merge_dicts(
+            environment_kwargs,
+            parse_json_args(env_json, label="--env-json"),
+        )
+        rlm_kwargs = _merge_dicts(
+            rlm_kwargs,
+            parse_json_args(rlm_json, label="--rlm-json"),
+        )
+
+        resolved_backend = backend or str(effective.data.get("backend"))
+        resolved_model = model if model is not None else str(effective.data.get("model") or "")
+        resolved_environment = environment or str(effective.data.get("environment"))
+        resolved_max_iterations = (
+            max_iterations
+            if max_iterations is not None
+            else _int_from_config(effective.data.get("max_iterations"), 30)
+        )
+        resolved_max_depth = (
+            max_depth
+            if max_depth is not None
+            else _int_from_config(effective.data.get("max_depth"), 1)
+        )
+        resolved_log_dir = log_dir
+        if resolved_log_dir is None:
+            output_cfg = effective.data.get("output")
+            if isinstance(output_cfg, dict):
+                resolved_log_dir = output_cfg.get("log_dir")
+
+        start = time.monotonic()
+        if json_mode:
+            with capture_stdout() as buffer:
+                result = run_completion(
+                    question=question,
+                    context_payload=context_payload_obj,
+                    backend=resolved_backend,
+                    environment=resolved_environment,
+                    max_iterations=resolved_max_iterations,
+                    max_depth=resolved_max_depth,
+                    backend_kwargs=backend_kwargs,
+                    environment_kwargs=environment_kwargs,
+                    rlm_kwargs=rlm_kwargs,
+                    model=resolved_model or None,
+                    log_dir=resolved_log_dir,
+                )
+            elapsed_ms = int((time.monotonic() - start) * 1000)
+            payload = build_output(
+                ok=True,
+                exit_code=0,
+                result={"response": result.response},
+                request=_build_request(
+                    question,
+                    inputs,
+                    resolved_backend,
+                    resolved_model,
+                    resolved_environment,
+                    resolved_max_iterations,
+                    resolved_max_depth,
+                    walk_opts,
+                ),
+                artifacts=_build_artifacts(resolved_log_dir),
+                stats=_build_stats(context_result, elapsed_ms),
+                warnings=context_result.warnings,
+                debug={"effective_config": effective_config_debug}
+                if effective_config_debug is not None
+                else None,
+            )
+            attach_captured_stdout(payload, buffer.getvalue())
+            _emit_output(payload, output)
+        else:
+            result = run_completion(
+                question=question,
+                context_payload=context_payload_obj,
+                backend=resolved_backend,
+                environment=resolved_environment,
+                max_iterations=resolved_max_iterations,
+                max_depth=resolved_max_depth,
+                backend_kwargs=backend_kwargs,
+                environment_kwargs=environment_kwargs,
+                rlm_kwargs=rlm_kwargs,
+                model=resolved_model or None,
+                log_dir=resolved_log_dir,
+            )
+            _emit_text_output(result.response, output, context_result.warnings)
+    except CliError as exc:
+        _handle_cli_error(exc, json_mode, output)
+
+
+def _run_complete(
+    ctx: typer.Context,
+    text: str,
+    backend: str | None,
+    model: str | None,
+    environment: str | None,
+    max_iterations: int | None,
+    max_depth: int | None,
+    verbose: bool,
+    quiet: bool,
+    config: str | None,
+    output_format: str | None,
+    json_output: bool,
+    output: str | None,
+    log_dir: str | None,
+    backend_arg: Iterable[str],
+    env_arg: Iterable[str],
+    rlm_arg: Iterable[str],
+    backend_json: Iterable[str],
+    env_json: Iterable[str],
+    rlm_json: Iterable[str],
+    print_effective_config: bool,
+) -> None:
+    if verbose and quiet:
+        raise CliUsageError(
+            "Cannot use --verbose and --quiet together.",
+            fix="Choose only one verbosity flag.",
+        )
+
+    try:
+        json_flag = _resolve_json_mode(ctx, output_format, json_output)
+        cli_overrides = _build_cli_overrides(
+            backend=backend,
+            model=model,
+            environment=environment,
+            max_iterations=max_iterations,
+            max_depth=max_depth,
+            output_format=output_format,
+            log_dir=log_dir,
+        )
+        effective = load_effective_config(
+            cli_overrides=cli_overrides,
+            cli_config_path=config,
+            defaults=DEFAULT_CONFIG,
+        )
+        output_format_final = _resolve_output_format(
+            json_flag,
+            output_format,
+            effective,
+        )
+        json_mode = output_format_final == "json"
+
+        effective_config_debug: dict[str, object] | None = None
+        if print_effective_config:
+            if json_mode:
+                effective_config_debug = dict(effective.data)
+            else:
+                _emit_effective_config(effective.data, json_mode)
+
+        backend_kwargs = parse_kv_args(backend_arg, label="--backend-arg")
+        environment_kwargs = parse_kv_args(env_arg, label="--env-arg")
+        rlm_kwargs = parse_kv_args(rlm_arg, label="--rlm-arg")
+        backend_kwargs = _merge_dicts(
+            _config_mapping(effective.data.get("backend_kwargs")),
+            backend_kwargs,
+        )
+        environment_kwargs = _merge_dicts(
+            _config_mapping(effective.data.get("environment_kwargs")),
+            environment_kwargs,
+        )
+        backend_kwargs = _merge_dicts(
+            backend_kwargs,
+            parse_json_args(backend_json, label="--backend-json"),
+        )
+        environment_kwargs = _merge_dicts(
+            environment_kwargs,
+            parse_json_args(env_json, label="--env-json"),
+        )
+        rlm_kwargs = _merge_dicts(
+            rlm_kwargs,
+            parse_json_args(rlm_json, label="--rlm-json"),
+        )
+
+        resolved_backend = backend or str(effective.data.get("backend"))
+        resolved_model = model if model is not None else str(effective.data.get("model") or "")
+        resolved_environment = environment or str(effective.data.get("environment"))
+        resolved_max_iterations = (
+            max_iterations
+            if max_iterations is not None
+            else _int_from_config(effective.data.get("max_iterations"), 30)
+        )
+        resolved_max_depth = (
+            max_depth
+            if max_depth is not None
+            else _int_from_config(effective.data.get("max_depth"), 1)
+        )
+        resolved_log_dir = log_dir
+        if resolved_log_dir is None:
+            output_cfg = effective.data.get("output")
+            if isinstance(output_cfg, dict):
+                resolved_log_dir = output_cfg.get("log_dir")
+
+        start = time.monotonic()
+        if json_mode:
+            with capture_stdout() as buffer:
+                result = run_completion(
+                    question=text,
+                    context_payload="",
+                    backend=resolved_backend,
+                    environment=resolved_environment,
+                    max_iterations=resolved_max_iterations,
+                    max_depth=resolved_max_depth,
+                    backend_kwargs=backend_kwargs,
+                    environment_kwargs=environment_kwargs,
+                    rlm_kwargs=rlm_kwargs,
+                    model=resolved_model or None,
+                    log_dir=resolved_log_dir,
+                )
+            elapsed_ms = int((time.monotonic() - start) * 1000)
+            payload = build_output(
+                ok=True,
+                exit_code=0,
+                result={"response": result.response},
+                request=_build_request(
+                    text,
+                    [],
+                    resolved_backend,
+                    resolved_model,
+                    resolved_environment,
+                    resolved_max_iterations,
+                    resolved_max_depth,
+                    None,
+                ),
+                artifacts=_build_artifacts(resolved_log_dir),
+                stats={"duration_ms": elapsed_ms},
+                warnings=[],
+                debug={"effective_config": effective_config_debug}
+                if effective_config_debug is not None
+                else None,
+            )
+            attach_captured_stdout(payload, buffer.getvalue())
+            _emit_output(payload, output)
+        else:
+            result = run_completion(
+                question=text,
+                context_payload="",
+                backend=resolved_backend,
+                environment=resolved_environment,
+                max_iterations=resolved_max_iterations,
+                max_depth=resolved_max_depth,
+                backend_kwargs=backend_kwargs,
+                environment_kwargs=environment_kwargs,
+                rlm_kwargs=rlm_kwargs,
+                model=resolved_model or None,
+                log_dir=resolved_log_dir,
+            )
+            _emit_text_output(result.response, output, [])
+    except CliError as exc:
+        _handle_cli_error(exc, json_mode, output)
+
+
+def _resolve_json_mode(
+    ctx: typer.Context,
+    output_format: str | None,
+    json_output: bool = False,
+) -> bool:
+    json_mode = bool(ctx.obj.get("json")) if ctx.obj else False
+    if json_mode:
+        return True
+    if json_output:
+        return True
+    if output_format is None:
+        return False
+    return output_format.lower() == "json"
+
+
+def _resolve_output_format(
+    json_flag: bool,
+    output_format: str | None,
+    effective: Any,
+) -> str:
+    if json_flag:
+        return "json"
+    if output_format:
+        return output_format
+    output_cfg = effective.data.get("output")
+    if isinstance(output_cfg, dict):
+        return str(output_cfg.get("format") or "text")
+    return "text"
+
+
+def _parse_extensions(values: list[str] | None) -> list[str]:
+    if not values:
+        return list(DEFAULT_EXTENSIONS)
+    flattened: list[str] = []
+    for raw in values:
+        flattened.extend(part.strip() for part in raw.split(",") if part.strip())
+    return flattened
+
+
+def _flatten_list(values: Iterable[str]) -> list[str]:
+    flattened: list[str] = []
+    for raw in values:
+        flattened.extend(part.strip() for part in raw.split(",") if part.strip())
+    return flattened
+
+
+def _merge_dicts(base: dict[str, object], override: dict[str, object]) -> dict[str, object]:
+    merged = dict(base)
+    merged.update(override)
+    return merged
+
+
+def _config_mapping(value: object | None) -> dict[str, object]:
+    if isinstance(value, dict):
+        return dict(value)
+    return {}
+
+
+def _int_from_config(value: object, default: int) -> int:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return default
+    return default
+
+
+def _build_cli_overrides(
+    *,
+    backend: str | None,
+    model: str | None,
+    environment: str | None,
+    max_iterations: int | None,
+    max_depth: int | None,
+    output_format: str | None,
+    log_dir: str | None,
+) -> dict[str, object]:
+    overrides: dict[str, object] = {}
+    if backend is not None:
+        overrides["backend"] = backend
+    if model is not None:
+        overrides["model"] = model
+    if environment is not None:
+        overrides["environment"] = environment
+    if max_iterations is not None:
+        overrides["max_iterations"] = max_iterations
+    if max_depth is not None:
+        overrides["max_depth"] = max_depth
+    if output_format is not None or log_dir is not None:
+        output_override: dict[str, object] = {}
+        if output_format is not None:
+            output_override["format"] = output_format
+        if log_dir is not None:
+            output_override["log_dir"] = log_dir
+        overrides["output"] = output_override
+    return overrides
+
+
+def _build_request(
+    question: str,
+    inputs: list[str],
+    backend: str,
+    model: str,
+    environment: str,
+    max_iterations: int,
+    max_depth: int,
+    walk_opts: WalkOptions | None,
+) -> dict[str, object]:
+    limits: dict[str, object] = {
+        "max_iterations": max_iterations,
+        "max_depth": max_depth,
+    }
+    request: dict[str, object] = {
+        "question": question,
+        "inputs": inputs,
+        "backend": backend,
+        "model": model,
+        "environment": environment,
+        "limits": limits,
+    }
+    if walk_opts:
+        limits.update(
+            {
+                "max_file_bytes": walk_opts.max_file_bytes,
+                "max_total_bytes": walk_opts.max_total_bytes,
+            }
+        )
+    return request
+
+
+def _build_artifacts(log_dir: str | None) -> dict[str, object]:
+    if not log_dir:
+        return {}
+    return {"log_dir": log_dir}
+
+
+def _build_stats(result: Any, duration_ms: int) -> dict[str, object]:
+    return {
+        "documents": len(result.files),
+        "bytes_total": result.total_bytes,
+        "duration_ms": duration_ms,
+    }
+
+
+def _emit_effective_config(config: dict[str, object], json_mode: bool) -> None:
+    if json_mode:
+        return
+    typer.echo(render_effective_config_text(config), err=True)
+
+
+def _emit_output(payload: dict[str, object], output: str | None) -> None:
+    if output:
+        Path(output).write_text(json.dumps(payload, ensure_ascii=True) + "\n")
+        return
+    emit_json(payload)
+
+
+def _emit_text_output(result_text: str, output: str | None, warnings: list[str]) -> None:
+    if output:
+        Path(output).write_text(result_text + "\n")
+        for warning in warnings:
+            typer.echo(f"Warning: {warning}", err=True)
+        return
+    emit_text(result_text, warnings=warnings)
+
+
+def _handle_cli_error(error: CliError, json_mode: bool, output: str | None) -> None:
+    if json_mode:
+        payload = build_output(
+            ok=False,
+            exit_code=error.exit_code,
+            error=format_error_json(error),
+            warnings=[],
+        )
+        _emit_output(payload, output)
+    else:
+        typer.echo(format_error_text(error), err=True)
+    raise typer.Exit(code=error.exit_code)

@@ -10,7 +10,7 @@ requires-python = ">=3.9"
 dependencies = [
   "pathspec",
   "pyyaml",
-  "rlm",
+  "rlm @ git+https://github.com/alexzhang13/rlm.git",
   "typer",
 ]
 
@@ -31,3 +31,23 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+
+[tool.mypy]
+python_version = "3.9"
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unused_configs = true
+ignore_missing_imports = true
+strict_optional = true
+
+[tool.pytest.ini_options]
+markers = [
+  "integration: integration tests",
+]

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from typing import Sequence
 
 from .errors import InputError
 
@@ -22,6 +23,28 @@ class InputSource:
     value: str | Path | None
 
 
+def parse_inputs(
+    tokens: Sequence[str],
+    *,
+    literal: bool = False,
+    path: bool = False,
+) -> list[InputSource]:
+    if path:
+        parsed: list[InputSource] = []
+        for token in tokens:
+            source = _parse_path(token, required=True)
+            assert source is not None
+            parsed.append(source)
+        return parsed
+    if not tokens:
+        return []
+    sources: list[InputSource] = []
+    for token in tokens:
+        source = parse_input_source(token, literal=literal, path=None)
+        sources.append(source)
+    return sources
+
+
 def parse_input_source(
     token: str | None,
     *,
@@ -29,7 +52,9 @@ def parse_input_source(
     path: str | None = None,
 ) -> InputSource:
     if path:
-        return _parse_path(path, required=True)
+        resolved = _parse_path(path, required=True)
+        assert resolved is not None
+        return resolved
 
     if token is None:
         raise InputError(
@@ -41,12 +66,12 @@ def parse_input_source(
     if token == "-":
         return InputSource(InputKind.STDIN, None)
 
+    if literal:
+        return InputSource(InputKind.LITERAL, token)
+
     resolved = _parse_path(token, required=False)
     if resolved:
         return resolved
-
-    if literal:
-        return InputSource(InputKind.LITERAL, token)
 
     raise InputError(
         "Input path does not exist.",

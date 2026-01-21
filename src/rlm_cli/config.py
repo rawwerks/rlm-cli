@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import os
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping
+from typing import Mapping, cast
 
 import yaml
 
@@ -16,7 +16,14 @@ ENV_OUTPUT_FORMAT = "RLM_OUTPUT"
 ENV_OUTPUT_JSON = "RLM_JSON"
 
 DEFAULT_CONFIG: dict[str, object] = {
-    "output": {"format": "text"},
+    "backend": "openai",
+    "model": "",
+    "environment": "local",
+    "max_iterations": 30,
+    "max_depth": 1,
+    "backend_kwargs": {},
+    "environment_kwargs": {},
+    "output": {"format": "text", "log_dir": None},
 }
 
 
@@ -162,7 +169,9 @@ def _deep_merge(
             and isinstance(result[key], dict)
             and isinstance(value, dict)
         ):
-            result[key] = _deep_merge(result[key], value)
+            left = cast(dict[str, object], result[key])
+            right = cast(dict[str, object], value)
+            result[key] = _deep_merge(left, right)
         else:
             result[key] = value
     return result

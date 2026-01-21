@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager, redirect_stdout
 import io
 import json
 import sys
-from typing import Mapping, Sequence
+from contextlib import contextmanager, redirect_stdout
+from typing import Iterator, Mapping, Sequence
 
 OUTPUT_SCHEMA_VERSION = "rlm-cli.output.v1"
 
@@ -20,6 +20,7 @@ def build_output(
     artifacts: dict[str, object] | None = None,
     stats: dict[str, object] | None = None,
     warnings: Sequence[str] | None = None,
+    error: dict[str, object] | None = None,
     debug: dict[str, object] | None = None,
 ) -> dict[str, object]:
     payload: dict[str, object] = {
@@ -32,6 +33,8 @@ def build_output(
         "stats": stats or {},
         "warnings": list(warnings or []),
     }
+    if error:
+        payload["error"] = error
     if debug:
         payload["debug"] = debug
     return payload
@@ -60,7 +63,7 @@ def emit_text(result_text: str, *, warnings: Sequence[str] = ()) -> None:
 
 
 @contextmanager
-def capture_stdout() -> io.StringIO:
+def capture_stdout() -> Iterator[io.StringIO]:
     buffer = io.StringIO()
     with redirect_stdout(buffer):
         yield buffer

@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import hashlib
 import os
+import sys
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Sequence
 
 import pathspec
 
 from .errors import InputError
+from .inputs import InputKind, InputSource
 
 DEFAULT_EXCLUDE_DIRS = {
     ".git",
@@ -41,6 +43,7 @@ class WalkOptions:
     max_total_bytes: int | None = None
     binary_policy: str = "skip"
     exclude_lockfiles: bool = False
+    encoding: str = "utf-8"
 
 
 @dataclass(frozen=True)
@@ -142,7 +145,10 @@ def collect_directory(
                 continue
 
             try:
-                content = full_path.read_text(encoding="utf-8", errors="replace")
+                content = full_path.read_text(
+                    encoding=opts.encoding,
+                    errors="replace",
+                )
             except OSError as exc:
                 result.warnings.append(f"Failed to read {rel_path}: {exc}")
                 continue
@@ -164,10 +170,10 @@ def build_context_payload(
     *,
     root: Path,
     files: Sequence[FileEntry],
-    notes: Sequence[str] | None = None,
+    notes: dict[str, object] | None = None,
 ) -> dict[str, object]:
     root_path = root.resolve()
-    notes_list = list(notes or [])
+    notes_dict = dict(notes or {})
     documents: list[dict[str, object]] = []
     sorted_files = sorted(files, key=lambda entry: entry.path.as_posix())
 
@@ -188,8 +194,57 @@ def build_context_payload(
         "type": "rlm_cli_context_v1",
         "root": root_path.as_posix(),
         "documents": documents,
-        "notes": notes_list,
+        "notes": notes_dict,
     }
+
+
+def build_context_from_sources(
+    sources: Sequence[InputSource],
+    *,
+    root: Path | None = None,
+    options: WalkOptions | None = None,
+    dir_mode: str = "docs",
+) -> tuple[dict[str, object], WalkResult]:
+    opts = options or WalkOptions()
+    root_path = root.resolve() if root else Path.cwd().resolve()
+    combined = WalkResult()
+
+    literal_docs: list[FileEntry] = []
+    for source in sources:
+        if source.kind == InputKind.STDIN:
+            content = _read_stdin()
+            literal_docs.append(
+                FileEntry(
+                    path=Path("stdin"),
+                    size=len(content.encode(opts.encoding, errors="replace")),
+                    content=content,
+                )
+            )
+        elif source.kind == InputKind.LITERAL:
+            content = str(source.value or "")
+            literal_docs.append(
+                FileEntry(
+                    path=Path("literal"),
+                    size=len(content.encode(opts.encoding, errors="replace")),
+                    content=content,
+                )
+            )
+        elif source.kind == InputKind.FILE and isinstance(source.value, Path):
+            entry = _load_file_entry(source.value, opts)
+            if entry is not None:
+                literal_docs.append(entry)
+        elif source.kind == InputKind.DIR and isinstance(source.value, Path):
+            result = collect_directory(source.value, options=opts)
+            combined.files.extend(result.files)
+            combined.warnings.extend(result.warnings)
+            combined.truncated = combined.truncated or result.truncated
+            combined.total_bytes += result.total_bytes
+
+    combined.files.extend(literal_docs)
+    combined.files.sort(key=lambda entry: entry.path.as_posix())
+    notes = _build_notes(opts, combined, dir_mode=dir_mode)
+    payload = build_context_payload(root=root_path, files=combined.files, notes=notes)
+    return payload, combined
 
 
 def _normalize_extensions(extensions: Sequence[str] | None) -> set[str] | None:
@@ -294,3 +349,61 @@ def _language_from_path(path: Path) -> str:
         "md": "markdown",
         "rst": "rst",
     }.get(ext, ext)
+
+
+def _read_stdin() -> str:
+    try:
+        return sys.stdin.read()
+    except Exception as exc:  # noqa: BLE001
+        raise InputError(
+            "Failed to read stdin.",
+            why=str(exc),
+            fix="Ensure stdin is available or provide a file path instead.",
+        ) from exc
+
+
+def _load_file_entry(path: Path, opts: WalkOptions) -> FileEntry | None:
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        raise InputError(
+            "Failed to read file.",
+            why=str(exc),
+            fix="Check file permissions.",
+        ) from exc
+
+    if opts.max_file_bytes is not None and size > opts.max_file_bytes:
+        return None
+    if _is_binary(path):
+        if opts.binary_policy == "error":
+            raise InputError(
+                "Binary file detected.",
+                why=f"'{path}' appears to be binary.",
+                fix="Remove the file or adjust binary handling.",
+            )
+        return None
+    try:
+        content = path.read_text(encoding=opts.encoding, errors="replace")
+    except OSError as exc:
+        raise InputError(
+            "Failed to read file.",
+            why=str(exc),
+            fix="Check file permissions.",
+        ) from exc
+    return FileEntry(path=path, size=size, content=content)
+
+
+def _build_notes(
+    opts: WalkOptions,
+    result: WalkResult,
+    *,
+    dir_mode: str,
+) -> dict[str, object]:
+    return {
+        "generated_by": "rlm-cli",
+        "extensions": list(opts.extensions or []),
+        "excluded": list(opts.exclude_globs),
+        "respect_gitignore": opts.respect_gitignore,
+        "dir_mode": dir_mode,
+        "truncated": result.truncated,
+    }

@@ -2,15 +2,123 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+import inspect
 import json
 import re
-from typing import Iterable
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Iterable, Mapping
 
-from .errors import InputError
+from .errors import BackendError, InputError
 
 _INT_RE = re.compile(r"^[+-]?\d+$")
 _FLOAT_RE = re.compile(r"^[+-]?\d+\.\d+([eE][+-]?\d+)?$")
+
+
+@dataclass(frozen=True)
+class RlmResult:
+    response: str
+    raw: object
+
+
+def run_completion(
+    *,
+    question: str,
+    context_payload: object,
+    backend: str,
+    environment: str,
+    max_iterations: int,
+    max_depth: int,
+    backend_kwargs: Mapping[str, object] | None = None,
+    environment_kwargs: Mapping[str, object] | None = None,
+    rlm_kwargs: Mapping[str, object] | None = None,
+    model: str | None = None,
+    log_dir: str | None = None,
+) -> RlmResult:
+    try:
+        from rlm import RLM
+    except Exception as exc:  # noqa: BLE001
+        raise BackendError(
+            "Failed to import rlm.",
+            why=str(exc),
+            fix="Install the rlm package and ensure it is importable.",
+        ) from exc
+
+    logger = _maybe_logger(log_dir)
+
+    backend_payload = dict(backend_kwargs or {})
+    if model and "model_name" not in backend_payload:
+        backend_payload["model_name"] = model
+
+    rlm_init_kwargs: dict[str, object] = {
+        "backend": backend,
+        "environment": environment,
+        "max_iterations": max_iterations,
+        "max_depth": max_depth,
+        "backend_kwargs": backend_payload,
+        "environment_kwargs": dict(environment_kwargs or {}),
+    }
+    if logger is not None:
+        rlm_init_kwargs["logger"] = logger
+    if rlm_kwargs:
+        rlm_init_kwargs.update(rlm_kwargs)
+
+    filtered_kwargs = _filter_init_kwargs(RLM, rlm_init_kwargs)
+    try:
+        rlm_instance = RLM(**filtered_kwargs)
+    except TypeError as exc:
+        raise BackendError(
+            "Failed to initialize RLM.",
+            why=str(exc),
+            fix="Check rlm version compatibility and provided arguments.",
+        ) from exc
+
+    try:
+        completion = rlm_instance.completion(
+            prompt=context_payload,
+            root_prompt=question,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise BackendError(
+            "RLM completion failed.",
+            why=str(exc),
+            fix="Check backend credentials and environment settings.",
+        ) from exc
+
+    response = getattr(completion, "response", None)
+    if response is None:
+        response = str(completion)
+    return RlmResult(response=str(response), raw=completion)
+
+
+def _maybe_logger(log_dir: str | None) -> object | None:
+    if not log_dir:
+        return None
+    try:
+        from rlm import RLMLogger
+    except Exception:
+        return None
+    try:
+        return RLMLogger(log_dir=log_dir)
+    except Exception:
+        return None
+
+
+def _filter_init_kwargs(
+    cls: type[Any],
+    kwargs: Mapping[str, object],
+) -> dict[str, object]:
+    try:
+        signature = inspect.signature(getattr(cls, "__init__"))
+    except (TypeError, ValueError):
+        return dict(kwargs)
+
+    for param in signature.parameters.values():
+        if param.kind == inspect.Parameter.VAR_KEYWORD:
+            return dict(kwargs)
+
+    allowed = {name for name in signature.parameters if name != "self"}
+    return {key: value for key, value in kwargs.items() if key in allowed}
 
 
 def parse_kv_args(values: Iterable[str], *, label: str) -> dict[str, object]:
