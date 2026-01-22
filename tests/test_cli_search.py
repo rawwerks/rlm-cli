@@ -149,7 +149,9 @@ def test_search_command_limit(tmp_path: Path) -> None:
     runner.invoke(app, ["index", str(test_dir)])
 
     # Search with limit
-    result = runner.invoke(app, ["search", "func", "--path", str(test_dir), "--limit", "3", "--json"])
+    result = runner.invoke(
+        app, ["search", "func", "--path", str(test_dir), "--limit", "3", "--json"]
+    )
     assert result.exit_code == 0
 
     output = json.loads(result.output)
