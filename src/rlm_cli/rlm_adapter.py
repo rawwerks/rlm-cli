@@ -42,6 +42,7 @@ def run_completion(
             "Failed to import rlm.",
             why=str(exc),
             fix="Install the rlm package and ensure it is importable.",
+            try_steps=["python -c \"import rlm; print(rlm.__version__)\""],
         ) from exc
 
     logger = _maybe_logger(log_dir)
@@ -71,6 +72,7 @@ def run_completion(
             "Failed to initialize RLM.",
             why=str(exc),
             fix="Check rlm version compatibility and provided arguments.",
+            try_steps=["rlm spec --json"],
         ) from exc
 
     try:
@@ -83,6 +85,7 @@ def run_completion(
             "RLM completion failed.",
             why=str(exc),
             fix="Check backend credentials and environment settings.",
+            try_steps=["rlm doctor --json"],
         ) from exc
 
     response = getattr(completion, "response", None)

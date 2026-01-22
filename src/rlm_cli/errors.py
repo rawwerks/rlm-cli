@@ -20,9 +20,10 @@ class CliError(Exception):
             "type": self.error_type,
             "message": self.message,
         }
-        hint = self.fix or self.why
-        if hint:
-            payload["hint"] = hint
+        if self.why:
+            payload["detail"] = self.why
+        if self.fix:
+            payload["hint"] = self.fix
         if self.try_steps:
             payload["try"] = list(self.try_steps)
         return payload
