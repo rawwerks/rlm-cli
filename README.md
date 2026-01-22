@@ -21,7 +21,13 @@ uvx --from git+https://github.com/rawwerks/rlm-cli.git rlm --help
 
 ## Authentication
 
-OpenRouter requires `OPENROUTER_API_KEY` in your environment:
+Authentication depends on the backend you choose:
+
+- `openrouter`: `OPENROUTER_API_KEY`
+- `openai`: `OPENAI_API_KEY`
+- `anthropic`: `ANTHROPIC_API_KEY`
+
+Export the appropriate key in your shell environment, for example:
 
 ```bash
 export OPENROUTER_API_KEY=sk-or-...
