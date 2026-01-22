@@ -39,7 +39,7 @@ def run_completion(
     custom_system_prompt: str | None = None,
 ) -> RlmResult:
     try:
-        from rlm import RLM
+        from rlm import RLM  # type: ignore[attr-defined]
     except Exception as exc:  # noqa: BLE001
         raise BackendError(
             "Failed to import rlm.",
@@ -106,7 +106,7 @@ def _maybe_logger(log_dir: str | None) -> object | None:
     if not log_dir:
         return None
     try:
-        from rlm import RLMLogger
+        from rlm import RLMLogger  # type: ignore[attr-defined]
     except Exception:
         return None
     try:
