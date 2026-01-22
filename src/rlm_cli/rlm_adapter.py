@@ -34,6 +34,7 @@ def run_completion(
     rlm_kwargs: Mapping[str, object] | None = None,
     model: str | None = None,
     log_dir: str | None = None,
+    verbose: bool = False,
 ) -> RlmResult:
     try:
         from rlm import RLM
@@ -61,6 +62,8 @@ def run_completion(
     }
     if logger is not None:
         rlm_init_kwargs["logger"] = logger
+    if verbose and (not rlm_kwargs or "verbose" not in rlm_kwargs):
+        rlm_init_kwargs["verbose"] = True
     if rlm_kwargs:
         rlm_init_kwargs.update(rlm_kwargs)
 

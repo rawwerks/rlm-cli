@@ -122,6 +122,7 @@ def ask(
     max_iterations: int | None = typer.Option(None, help="Maximum iterations."),
     max_depth: int | None = typer.Option(None, help="Maximum depth."),
     verbose: bool = typer.Option(False, help="Enable verbose logging."),
+    debug: bool = typer.Option(False, "--debug", help="Enable debug logging."),
     quiet: bool = typer.Option(False, help="Suppress non-error logs."),
     config: str | None = typer.Option(None, help="Path to YAML config file."),
     output_format: str | None = typer.Option(
@@ -236,6 +237,7 @@ def ask(
         max_iterations,
         max_depth,
         verbose,
+        debug,
         quiet,
         config,
         output_format,
@@ -275,6 +277,7 @@ def complete(
     max_iterations: int | None = typer.Option(None, help="Maximum iterations."),
     max_depth: int | None = typer.Option(None, help="Maximum depth."),
     verbose: bool = typer.Option(False, help="Enable verbose logging."),
+    debug: bool = typer.Option(False, "--debug", help="Enable debug logging."),
     quiet: bool = typer.Option(False, help="Suppress non-error logs."),
     config: str | None = typer.Option(None, help="Path to YAML config file."),
     output_format: str | None = typer.Option(
@@ -334,6 +337,7 @@ def complete(
         max_iterations,
         max_depth,
         verbose,
+        debug,
         quiet,
         config,
         output_format,
@@ -393,6 +397,7 @@ def _run_ask(
     max_iterations: int | None,
     max_depth: int | None,
     verbose: bool,
+    debug: bool,
     quiet: bool,
     config: str | None,
     output_format: str | None,
@@ -420,7 +425,8 @@ def _run_ask(
     path: bool,
     print_effective_config: bool,
 ) -> None:
-    if verbose and quiet:
+    effective_verbose = verbose or debug
+    if effective_verbose and quiet:
         raise CliUsageError(
             "Cannot use --verbose and --quiet together.",
             fix="Choose only one verbosity flag.",
@@ -547,6 +553,7 @@ def _run_ask(
                     rlm_kwargs=rlm_kwargs,
                     model=resolved_model or None,
                     log_dir=resolved_log_dir,
+                    verbose=effective_verbose,
                 )
             elapsed_ms = int((time.monotonic() - start) * 1000)
             payload = build_output(
@@ -562,6 +569,7 @@ def _run_ask(
                     resolved_max_iterations,
                     resolved_max_depth,
                     walk_opts,
+                    effective_verbose,
                 ),
                 artifacts=_build_artifacts(resolved_log_dir),
                 stats=_build_stats(context_result, elapsed_ms),
@@ -585,6 +593,7 @@ def _run_ask(
                 rlm_kwargs=rlm_kwargs,
                 model=resolved_model or None,
                 log_dir=resolved_log_dir,
+                verbose=effective_verbose,
             )
             _emit_text_output(result.response, output, context_result.warnings)
     except CliError as exc:
@@ -600,6 +609,7 @@ def _run_complete(
     max_iterations: int | None,
     max_depth: int | None,
     verbose: bool,
+    debug: bool,
     quiet: bool,
     config: str | None,
     output_format: str | None,
@@ -614,7 +624,8 @@ def _run_complete(
     rlm_json: Iterable[str],
     print_effective_config: bool,
 ) -> None:
-    if verbose and quiet:
+    effective_verbose = verbose or debug
+    if effective_verbose and quiet:
         raise CliUsageError(
             "Cannot use --verbose and --quiet together.",
             fix="Choose only one verbosity flag.",
@@ -708,6 +719,7 @@ def _run_complete(
                     rlm_kwargs=rlm_kwargs,
                     model=resolved_model or None,
                     log_dir=resolved_log_dir,
+                    verbose=effective_verbose,
                 )
             elapsed_ms = int((time.monotonic() - start) * 1000)
             payload = build_output(
@@ -723,6 +735,7 @@ def _run_complete(
                     resolved_max_iterations,
                     resolved_max_depth,
                     None,
+                    effective_verbose,
                 ),
                 artifacts=_build_artifacts(resolved_log_dir),
                 stats={"duration_ms": elapsed_ms},
@@ -746,6 +759,7 @@ def _run_complete(
                 rlm_kwargs=rlm_kwargs,
                 model=resolved_model or None,
                 log_dir=resolved_log_dir,
+                verbose=effective_verbose,
             )
             _emit_text_output(result.response, output, [])
     except CliError as exc:
@@ -863,6 +877,7 @@ def _build_request(
     max_iterations: int,
     max_depth: int,
     walk_opts: WalkOptions | None,
+    verbose: bool,
 ) -> dict[str, object]:
     limits: dict[str, object] = {
         "max_iterations": max_iterations,
@@ -874,6 +889,7 @@ def _build_request(
         "backend": backend,
         "model": model,
         "environment": environment,
+        "verbose": verbose,
         "limits": limits,
     }
     if walk_opts:

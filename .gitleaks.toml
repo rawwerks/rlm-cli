@@ -1,0 +1,6 @@
+[allowlist]
+paths = [
+  '''^\.beads/''',
+  '''^\.venv/''',
+  '''^tests/fixtures/''',
+]
