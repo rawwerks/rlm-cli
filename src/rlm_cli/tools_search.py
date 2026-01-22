@@ -71,8 +71,8 @@ try:
     from .indexer import TANTIVY_AVAILABLE, IndexConfig, RlmIndexer
 except ImportError:
     TANTIVY_AVAILABLE = False
-    IndexConfig = None
-    RlmIndexer = None
+    IndexConfig = None  # type: ignore[assignment,misc]
+    RlmIndexer = None  # type: ignore[assignment,misc]
 
 
 def _require_tantivy() -> None:
