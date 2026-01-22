@@ -11,7 +11,7 @@ dependencies = [
   "pathspec",
   "markitdown",
   "pyyaml",
-  "rlm @ git+https://github.com/alexzhang13/rlm.git",
+  "rlm @ file:./rlm",
   "typer",
 ]
 
