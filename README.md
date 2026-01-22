@@ -4,6 +4,37 @@ CLI wrapper for `rlm` with directory-as-context, JSON-first output, and self-doc
 
 Upstream RLM: https://github.com/alexzhang13/rlm
 
+## Claude Code Plugin
+
+This repo includes a Claude Code plugin with an `rlm` skill. The skill teaches Claude how to use the rlm CLI for code analysis, diff reviews, and codebase exploration.
+
+### Install as local plugin
+
+```bash
+# Clone the repo
+git clone https://github.com/rawwerks/rlm-cli.git
+
+# Create local-plugins directory if needed
+mkdir -p ~/.claude/local-plugins
+
+# Remove existing rlm plugin if present, then symlink
+rm -rf ~/.claude/local-plugins/rlm
+ln -s "$(pwd)/rlm-cli" ~/.claude/local-plugins/rlm
+```
+
+Restart Claude Code to load the plugin.
+
+### What the skill provides
+
+The `/rlm` skill gives Claude knowledge of:
+- All rlm commands (`ask`, `complete`, `search`, `index`, `doctor`)
+- Input types (files, directories, URLs, stdin, literal text)
+- Common workflows (diff review, codebase analysis, search + analyze)
+- Configuration and environment variables
+- Exit codes for error handling
+
+Once installed, Claude can use rlm to analyze code, review diffs, and explore codebases when you ask it to.
+
 ## Install
 
 ### pip/uv
