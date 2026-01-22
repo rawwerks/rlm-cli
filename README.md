@@ -2,6 +2,8 @@
 
 CLI wrapper for `rlm` with directory-as-context, JSON-first output, and self-documenting commands.
 
+Upstream RLM: https://github.com/alexzhang13/rlm
+
 ## Install
 
 ### pip/uv
