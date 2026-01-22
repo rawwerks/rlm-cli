@@ -19,6 +19,14 @@ uv pip install -e .
 uvx --from git+https://github.com/rawwerks/rlm-cli.git rlm --help
 ```
 
+## Authentication
+
+OpenRouter requires `OPENROUTER_API_KEY` in your environment:
+
+```bash
+export OPENROUTER_API_KEY=sk-or-...
+```
+
 ## Usage
 
 ### Ask about a repo
@@ -43,6 +51,12 @@ git diff | rlm ask - -q "Review this diff" --json
 
 ```bash
 rlm complete "Write a commit message" --json
+```
+
+### OpenRouter quickstart
+
+```bash
+rlm complete "Say hello" --backend openrouter --model z-ai/glm-4.7:turbo --json
 ```
 
 ## Options

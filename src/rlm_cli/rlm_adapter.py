@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -46,6 +47,7 @@ def run_completion(
             try_steps=["python -c \"import rlm; print(rlm.__version__)\""],
         ) from exc
 
+    _preflight_auth(backend, backend_kwargs)
     logger = _maybe_logger(log_dir)
 
     backend_payload = dict(backend_kwargs or {})
@@ -108,6 +110,26 @@ def _maybe_logger(log_dir: str | None) -> object | None:
         return RLMLogger(log_dir=log_dir)
     except Exception:
         return None
+
+
+def _preflight_auth(backend: str, backend_kwargs: Mapping[str, object] | None) -> None:
+    backend_kwargs = backend_kwargs or {}
+    if backend == "openrouter":
+        if "api_key" not in backend_kwargs and not os.getenv("OPENROUTER_API_KEY"):
+            raise BackendError(
+                "Missing OpenRouter API key.",
+                why="OPENROUTER_API_KEY is not set and no api_key was provided.",
+                fix="Export OPENROUTER_API_KEY or pass --backend-arg api_key=...",
+                try_steps=["export OPENROUTER_API_KEY=sk-or-..."],
+            )
+    if backend == "openai":
+        if "api_key" not in backend_kwargs and not os.getenv("OPENAI_API_KEY"):
+            raise BackendError(
+                "Missing OpenAI API key.",
+                why="OPENAI_API_KEY is not set and no api_key was provided.",
+                fix="Export OPENAI_API_KEY or pass --backend-arg api_key=...",
+                try_steps=["export OPENAI_API_KEY=sk-..."],
+            )
 
 
 def _filter_init_kwargs(
