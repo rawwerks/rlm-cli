@@ -213,26 +213,31 @@ def build_context_from_sources(
     for source in sources:
         if source.kind == InputKind.STDIN:
             content = _read_stdin()
+            content_bytes = content.encode(opts.encoding, errors="replace")
             literal_docs.append(
                 FileEntry(
                     path=Path("stdin"),
-                    size=len(content.encode(opts.encoding, errors="replace")),
+                    size=len(content_bytes),
                     content=content,
                 )
             )
+            combined.total_bytes += len(content_bytes)
         elif source.kind == InputKind.LITERAL:
             content = str(source.value or "")
+            content_bytes = content.encode(opts.encoding, errors="replace")
             literal_docs.append(
                 FileEntry(
                     path=Path("literal"),
-                    size=len(content.encode(opts.encoding, errors="replace")),
+                    size=len(content_bytes),
                     content=content,
                 )
             )
+            combined.total_bytes += len(content_bytes)
         elif source.kind == InputKind.FILE and isinstance(source.value, Path):
             entry = _load_file_entry(source.value, opts)
             if entry is not None:
                 literal_docs.append(entry)
+                combined.total_bytes += entry.size
         elif source.kind == InputKind.DIR and isinstance(source.value, Path):
             result = collect_directory(source.value, options=opts)
             combined.files.extend(result.files)
