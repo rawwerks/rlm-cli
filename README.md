@@ -47,6 +47,12 @@ rlm ask . -q "Summarize this repo" --json
 rlm ask https://www.anthropic.com/constitution -q "Summarize this page" --json
 ```
 
+Same with `uvx` and OpenRouter:
+
+```bash
+uvx --from git+https://github.com/rawwerks/rlm-cli.git rlm ask https://www.anthropic.com/constitution -q "Summarize Claude's constitution" --backend openrouter --model google/gemini-3-flash-preview --json
+```
+
 ### Ask about a file
 
 ```bash
@@ -108,3 +114,11 @@ Precedence: CLI flags > env vars > config > defaults.
 - `11` config error
 - `20` backend error
 - `30` runtime error
+
+## Security
+
+Install the pre-commit hook to run gitleaks on staged changes:
+
+```bash
+pre-commit install
+```
