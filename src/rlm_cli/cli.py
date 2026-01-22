@@ -746,8 +746,10 @@ def _run_ask(
                 )
                 custom_system_prompt = RLM_SYSTEM_PROMPT + search_prompt
                 # Setup code to pre-load search tools into REPL namespace
+                # configure_root() sets SEARCH_ROOT so rg/tv use project root by default
                 search_setup_code = f'''
-from rlm_cli.tools_search import rg, tv, scan, recall
+from rlm_cli.tools_search import rg, tv, scan, recall, configure_root
+configure_root("{indexed_root}")
 tv.ensure_index(root="{indexed_root}", force=False)
 '''
             except ImportError:

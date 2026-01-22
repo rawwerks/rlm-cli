@@ -24,6 +24,27 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
+# ---- Module-level search root configuration ----------------------------------
+
+# Global search root - set via configure_root() to override default "." paths
+# This is critical for REPL environments where the working directory differs
+# from the target codebase.
+SEARCH_ROOT: Optional[str] = None
+
+
+def configure_root(root: str) -> None:
+    """Set the default search root for rg.search() and tv.search().
+
+    Call this in REPL setup to ensure searches target the correct directory
+    instead of the REPL's working directory.
+
+    Args:
+        root: Absolute path to the codebase root directory.
+    """
+    global SEARCH_ROOT
+    SEARCH_ROOT = root
+
+
 # ---- Ripgrep availability check ----------------------------------------------
 
 try:
@@ -167,11 +188,16 @@ class rg:
         """
         _require_ripgrep()
 
+        # Use SEARCH_ROOT as default when paths is the default (".",)
+        effective_paths: Sequence[str] = paths
+        if paths == (".",) and SEARCH_ROOT is not None:
+            effective_paths = (SEARCH_ROOT,)
+
         # Escape pattern if not regex mode (safer for LLMs)
         search_pattern = pattern if regex else re.escape(pattern)
 
         # Build search arguments
-        search_paths = [str(p) for p in paths]
+        search_paths = [str(p) for p in effective_paths]
 
         # Call python_ripgrep
         raw_results = python_ripgrep.search(  # type: ignore[union-attr]
@@ -309,7 +335,9 @@ class tv:
         """
         _require_tantivy()
 
-        root_path = Path(root) if root else Path(".")
+        # Use SEARCH_ROOT as default when root is not specified
+        effective_root = root if root is not None else SEARCH_ROOT
+        root_path = Path(effective_root) if effective_root else Path(".")
         indexer = _get_tv_indexer(root_path)
 
         search_results = indexer.search(query, limit=limit, language=language)
@@ -436,6 +464,8 @@ __all__ = [
     "tv",
     "scan",
     "recall",
+    "configure_root",
+    "SEARCH_ROOT",
     "RGHit",
     "TVHit",
     "RIPGREP_AVAILABLE",
