@@ -1,11 +1,11 @@
 ---
 name: rlm
-description: CLI for querying LLMs with file/directory/URL context. Use when users want to ask questions about code, analyze files, review diffs, or process documents with AI. Triggers on "rlm ask", "rlm complete", "rlm search", "rlm index", analyzing codebases, reviewing changes, or any task involving LLM queries with file context.
+description: Recursive Language Models (RLM) CLI - enables LLMs to recursively process large contexts by decomposing inputs and calling themselves over parts. Use for code analysis, diff reviews, codebase exploration. Triggers on "rlm ask", "rlm complete", "rlm search", "rlm index".
 ---
 
 # RLM CLI
 
-CLI for querying LLMs with context from files, directories, URLs, or stdin. The LLM can recursively call itself and use search tools to explore large inputs.
+Recursive Language Models (RLM) CLI - enables LLMs to handle near-infinite context by recursively decomposing inputs and calling themselves over parts. Supports files, directories, URLs, and stdin.
 
 ## Installation
 

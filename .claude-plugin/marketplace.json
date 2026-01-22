@@ -4,18 +4,18 @@
     "name": "rawwerks",
     "url": "https://github.com/rawwerks"
   },
+  "metadata": {
+    "description": "Marketplace for the RLM CLI plugin",
+    "version": "1.0.0"
+  },
   "plugins": [
     {
       "name": "rlm",
       "source": "./",
-      "description": "CLI for querying LLMs with file/directory/URL context for code analysis, diff reviews, and codebase exploration",
-      "strict": false,
-      "keywords": ["llm", "cli", "code-analysis", "diff-review", "context"],
+      "description": "Recursive Language Models (RLM) CLI - enables LLMs to recursively process large contexts by decomposing inputs and calling themselves over parts",
+      "version": "1.0.0",
+      "keywords": ["rlm", "recursive-language-models", "context", "code-analysis"],
       "skills": ["./skills/rlm"]
     }
-  ],
-  "metadata": {
-    "description": "Marketplace for the rlm CLI skill",
-    "version": "1.0.0"
-  }
+  ]
 }

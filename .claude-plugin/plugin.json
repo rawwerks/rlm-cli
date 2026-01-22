@@ -1,12 +1,12 @@
 {
   "name": "rlm",
   "version": "1.0.0",
-  "description": "CLI for querying LLMs with file/directory/URL context. Adds the /rlm skill for AI-assisted code analysis, diff reviews, and codebase exploration.",
+  "description": "Recursive Language Models (RLM) CLI - enables LLMs to recursively process large contexts by decomposing inputs and calling themselves over parts",
   "author": {
     "name": "rawwerks",
     "url": "https://github.com/rawwerks"
   },
   "repository": "https://github.com/rawwerks/rlm-cli",
   "license": "MIT",
-  "keywords": ["llm", "cli", "code-analysis", "diff-review", "context"]
+  "keywords": ["rlm", "recursive-language-models", "context", "code-analysis"]
 }

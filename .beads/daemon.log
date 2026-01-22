@@ -46,3 +46,18 @@ time=2026-01-21T16:07:10.010-05:00 level=ERROR msg="cannot open database" error=
 time=2026-01-21T16:07:25.993-05:00 level=INFO msg="Daemon started (interval: %v, auto-commit: %v, auto-push: %v)" !BADKEY=5s !BADKEY=false !BADKEY=false
 time=2026-01-21T16:07:25.994-05:00 level=INFO msg="using database" path=/home/raw/Documents/GitHub/rlm-cli/.beads/beads.db
 time=2026-01-21T16:07:26.013-05:00 level=ERROR msg="cannot open database" error="schema probe failed after migration retry: database schema is incompatible: missing columns in child_counters: last_child. Database may be corrupted or from incompatible version. Run 'bd doctor' to diagnose"
+time=2026-01-22T09:18:45.649-05:00 level=INFO msg="Daemon started (interval: %v, auto-commit: %v, auto-push: %v)" !BADKEY=5s !BADKEY=false !BADKEY=false
+time=2026-01-22T09:18:45.649-05:00 level=INFO msg="using database" path=/home/raw/Documents/GitHub/rlm-cli/.beads/beads.db
+time=2026-01-22T09:18:45.666-05:00 level=ERROR msg="cannot open database" error="schema probe failed after migration retry: database schema is incompatible: missing columns in child_counters: last_child. Database may be corrupted or from incompatible version. Run 'bd doctor' to diagnose"
+time=2026-01-22T09:18:58.987-05:00 level=INFO msg="Daemon started (interval: %v, auto-commit: %v, auto-push: %v)" !BADKEY=5s !BADKEY=false !BADKEY=false
+time=2026-01-22T09:18:58.987-05:00 level=INFO msg="using database" path=/home/raw/Documents/GitHub/rlm-cli/.beads/beads.db
+time=2026-01-22T09:18:59.008-05:00 level=ERROR msg="cannot open database" error="schema probe failed after migration retry: database schema is incompatible: missing columns in child_counters: last_child. Database may be corrupted or from incompatible version. Run 'bd doctor' to diagnose"
+time=2026-01-22T10:30:32.472-05:00 level=INFO msg="Daemon started (interval: %v, auto-commit: %v, auto-push: %v)" !BADKEY=5s !BADKEY=false !BADKEY=false
+time=2026-01-22T10:30:32.472-05:00 level=INFO msg="using database" path=/home/raw/Documents/GitHub/rlm-cli/.beads/beads.db
+time=2026-01-22T10:30:32.488-05:00 level=ERROR msg="cannot open database" error="schema probe failed after migration retry: database schema is incompatible: missing columns in child_counters: last_child. Database may be corrupted or from incompatible version. Run 'bd doctor' to diagnose"
+time=2026-01-22T10:34:27.788-05:00 level=INFO msg="Daemon started (interval: %v, auto-commit: %v, auto-push: %v)" !BADKEY=5s !BADKEY=false !BADKEY=false
+time=2026-01-22T10:34:27.788-05:00 level=INFO msg="using database" path=/home/raw/Documents/GitHub/rlm-cli/.beads/beads.db
+time=2026-01-22T10:34:27.803-05:00 level=ERROR msg="cannot open database" error="schema probe failed after migration retry: database schema is incompatible: missing columns in child_counters: last_child. Database may be corrupted or from incompatible version. Run 'bd doctor' to diagnose"
+time=2026-01-22T11:10:31.155-05:00 level=INFO msg="Daemon started (interval: %v, auto-commit: %v, auto-push: %v)" !BADKEY=5s !BADKEY=false !BADKEY=false
+time=2026-01-22T11:10:31.155-05:00 level=INFO msg="using database" path=/home/raw/Documents/GitHub/rlm-cli/.beads/beads.db
+time=2026-01-22T11:10:31.172-05:00 level=ERROR msg="cannot open database" error="schema probe failed after migration retry: database schema is incompatible: missing columns in child_counters: last_child. Database may be corrupted or from incompatible version. Run 'bd doctor' to diagnose"
