@@ -62,28 +62,45 @@ Input modes:
   - use --path to force filesystem interpretation.
 """
 
-# System prompt template for search tool when Tantivy index is available
+# System prompt template for search tools when available
 # Use SEARCH_TOOL_PROMPT_TEMPLATE.format(indexed_root=...) to fill in the path
 SEARCH_TOOL_PROMPT_TEMPLATE = """\
 
-Additionally, you have access to a Tantivy full-text search index of the codebase.
-You can use it in the REPL to find relevant files before diving into the context:
+You have access to two search tools for exploring the codebase:
+
+## 1. rg.search() - Fast Pattern Scanning (ripgrep)
+Use for exact/regex matches over raw files. Returns line-level hits.
 
 ```repl
-from rlm_cli.indexer import RlmIndexer, IndexConfig
-from pathlib import Path
+from rlm_cli.tools_search import rg, scan
 
-# Initialize the indexer with the indexed root path
-indexer = RlmIndexer(Path("{indexed_root}"), IndexConfig())
+# Find exact pattern
+hits = rg.search(pattern="TODO", paths=["{indexed_root}"], globs=["*.py"])
+for h in hits:
+    print(f"{{h['path']}}:{{h['line']}}: {{h['text']}}")
 
-# Search for relevant files
-results = indexer.search("error handling", limit=20)
-for r in results:
-    print(f"{{r.path}} (score: {{r.score:.2f}}, lang: {{r.language}})")
+# Or use the alias
+hits = scan(pattern="class.*Error", paths=["{indexed_root}"], regex=True)
 ```
 
-The search uses BM25 ranking to find the most relevant files.
-Use this to narrow down which parts of the context to focus on.
+## 2. tv.search() - Ranked Document Search (Tantivy)
+Use for BM25 ranked search over indexed documents. Returns doc-level results.
+
+```repl
+from rlm_cli.tools_search import tv, recall
+
+# Find relevant files by topic
+results = tv.search(query="error handling", limit=10, root="{indexed_root}")
+for r in results:
+    print(f"{{r['path']}} (score: {{r['score']:.2f}})")
+
+# Or use the alias
+results = recall(query="authentication flow", limit=20, root="{indexed_root}")
+```
+
+**When to use which:**
+- Use `rg.search()` / `scan()` for: exact strings, function names, imports, TODOs
+- Use `tv.search()` / `recall()` for: concepts, topics, finding related files
 """
 
 app = typer.Typer(
@@ -720,6 +737,7 @@ def _run_ask(
 
         # Build custom system prompt with search tool appended if available
         custom_system_prompt = None
+        search_setup_code = None
         if search_tool_available and indexed_root:
             try:
                 from rlm.utils.prompts import RLM_SYSTEM_PROMPT
@@ -727,6 +745,11 @@ def _run_ask(
                     indexed_root=str(indexed_root)
                 )
                 custom_system_prompt = RLM_SYSTEM_PROMPT + search_prompt
+                # Setup code to pre-load search tools into REPL namespace
+                search_setup_code = f'''
+from rlm_cli.tools_search import rg, tv, scan, recall
+tv.ensure_index(root="{indexed_root}", force=False)
+'''
             except ImportError:
                 pass  # RLM not available, skip search tool prompt
 
@@ -753,6 +776,12 @@ def _run_ask(
             environment_kwargs,
             parse_json_args(env_json, label="--env-json"),
         )
+        # Add search tool setup code to REPL environment
+        if search_setup_code:
+            environment_kwargs = _merge_dicts(
+                environment_kwargs,
+                {"setup_code": search_setup_code},
+            )
         rlm_kwargs = _merge_dicts(
             rlm_kwargs,
             parse_json_args(rlm_json, label="--rlm-json"),

@@ -90,7 +90,7 @@ rlm complete "Say hello" --backend openrouter --model z-ai/glm-4.7:turbo --json
 
 ## Search (optional)
 
-Full-text search via Tantivy for filtering large directories before LLM calls.
+Full-text search via Tantivy and ripgrep for the LLM to explore codebases efficiently.
 
 ### Install search support
 
@@ -98,27 +98,47 @@ Full-text search via Tantivy for filtering large directories before LLM calls.
 pip install 'rlm-cli[search]'
 ```
 
-### Index a directory
+This installs both Tantivy (ranked document search) and python-ripgrep (fast pattern matching).
 
+### LLM Search Tools
+
+When you run `rlm ask` on a directory, the LLM automatically gets access to two search tools in its REPL:
+
+**`rg.search()` - Fast pattern matching (ripgrep)**
+```python
+# Find exact patterns or regex matches
+hits = rg.search(pattern="class.*Error", paths=["src/"], regex=True)
+for h in hits:
+    print(f"{h['path']}:{h['line']}: {h['text']}")
+```
+
+**`tv.search()` - Ranked document search (Tantivy)**
+```python
+# Find relevant files by topic (BM25 ranking)
+results = tv.search(query="error handling", limit=10)
+for r in results:
+    print(f"{r['path']} (score: {r['score']:.2f})")
+```
+
+**When to use which:**
+- `rg.search()` for: exact strings, function names, class definitions, imports
+- `tv.search()` for: concepts, topics, finding related files
+
+The tools are pre-loaded - the LLM can use them directly without importing.
+
+### CLI Search Commands
+
+Index a directory:
 ```bash
 rlm index ./src
 ```
 
-### Search indexed documents
-
+Search indexed documents:
 ```bash
 rlm search "error handling" --path ./src
 ```
 
-### Filter context via search
-
-```bash
-rlm ask ./src -q "Explain error handling" --search "exception"
-```
-
 Options:
-- `--search "query"` - Filter context via BM25 search
-- `--search-limit N` - Max documents from search (default: 50)
 - `--no-index` - Skip auto-indexing directories
 - `--force` - Force full reindex (with `rlm index`)
 

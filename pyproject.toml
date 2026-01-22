@@ -23,7 +23,7 @@ dev = [
   "types-PyYAML",
 ]
 rich = ["rich"]
-search = ["tantivy>=0.22.0"]
+search = ["tantivy>=0.22.0", "python-ripgrep>=0.0.8"]
 
 [project.scripts]
 rlm = "rlm_cli.cli:app"

@@ -1,0 +1,5 @@
+# RLM CLI Configuration
+# This file sets project-level defaults
+
+backend: openrouter
+model: google/gemini-3-flash-preview
