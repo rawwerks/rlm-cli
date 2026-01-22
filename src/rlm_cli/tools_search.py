@@ -48,11 +48,11 @@ def configure_root(root: str) -> None:
 # ---- Ripgrep availability check ----------------------------------------------
 
 try:
-    import python_ripgrep  # type: ignore[import-not-found]
+    import python_ripgrep
 
     RIPGREP_AVAILABLE = True
 except ImportError:
-    python_ripgrep = None  # type: ignore[assignment]
+    python_ripgrep = None
     RIPGREP_AVAILABLE = False
 
 
@@ -71,8 +71,8 @@ try:
     from .indexer import TANTIVY_AVAILABLE, IndexConfig, RlmIndexer
 except ImportError:
     TANTIVY_AVAILABLE = False
-    IndexConfig = None  # type: ignore[misc,assignment]
-    RlmIndexer = None  # type: ignore[misc,assignment]
+    IndexConfig = None
+    RlmIndexer = None
 
 
 def _require_tantivy() -> None:
@@ -200,7 +200,7 @@ class rg:
         search_paths = [str(p) for p in effective_paths]
 
         # Call python_ripgrep
-        raw_results = python_ripgrep.search(  # type: ignore[union-attr]
+        raw_results = python_ripgrep.search(
             patterns=[search_pattern],
             paths=search_paths,
             globs=list(globs) if globs else None,
@@ -285,7 +285,7 @@ def _get_tv_indexer(root: Path) -> Any:
 
     root = root.resolve()
     if _tv_indexer is None or _tv_root != root:
-        _tv_indexer = RlmIndexer(root, IndexConfig())  # type: ignore[misc]
+        _tv_indexer = RlmIndexer(root, IndexConfig())
         _tv_root = root
 
     return _tv_indexer
