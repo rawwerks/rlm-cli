@@ -127,6 +127,25 @@ class RuntimeError(CliError):
         )
 
 
+class IndexError(CliError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        why: str | None = None,
+        fix: str | None = None,
+        try_steps: Iterable[str] | None = None,
+    ) -> None:
+        super().__init__(
+            message=message,
+            why=why,
+            fix=fix,
+            try_steps=tuple(try_steps or ()),
+            exit_code=40,
+            error_type="index_error",
+        )
+
+
 def format_error_text(error: CliError) -> str:
     lines = [f"✗ {error.message}"]
     if error.why:

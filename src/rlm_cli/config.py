@@ -24,6 +24,18 @@ DEFAULT_CONFIG: dict[str, object] = {
     "backend_kwargs": {},
     "environment_kwargs": {},
     "output": {"format": "text", "log_dir": None},
+    "search": {
+        "enabled": True,
+        "index_dir": "~/.cache/rlm-cli/tantivy",
+        "heap_size_mb": 50,
+        "auto_index": True,
+        "default_limit": 50,
+        "boosts": {
+            "path_stem": 3.0,
+            "path": 2.0,
+            "content": 1.0,
+        },
+    },
 }
 
 

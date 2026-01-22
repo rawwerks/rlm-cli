@@ -12,7 +12,7 @@ import typer
 
 from .config import DEFAULT_CONFIG, load_effective_config, render_effective_config_text
 from .context import WalkOptions, build_context_from_sources
-from .errors import CliError, CliUsageError, format_error_json, format_error_text
+from .errors import CliError, CliUsageError, IndexError, format_error_json, format_error_text
 from .inputs import parse_inputs
 from .output import (
     attach_captured_stdout,
@@ -186,6 +186,21 @@ def ask(
         "--markitdown/--no-markitdown",
         help="Convert URLs and non-text files to Markdown when possible.",
     ),
+    search_query: str | None = typer.Option(
+        None,
+        "--search",
+        help="Filter context via full-text search query.",
+    ),
+    search_limit: int = typer.Option(
+        50,
+        "--search-limit",
+        help="Maximum documents from search filter.",
+    ),
+    no_index: bool = typer.Option(
+        False,
+        "--no-index",
+        help="Skip auto-indexing directories.",
+    ),
     backend_arg: list[str] = typer.Option(
         (),
         "--backend-arg",
@@ -261,6 +276,9 @@ def ask(
         hidden,
         follow_symlinks,
         markitdown,
+        search_query,
+        search_limit,
+        no_index,
         backend_arg,
         env_arg,
         rlm_arg,
@@ -393,6 +411,173 @@ def schema(ctx: typer.Context) -> None:
     emit_text(json.dumps(output_schema(), indent=2, ensure_ascii=True))
 
 
+@app.command(help="Build or update the search index for a directory.")
+def index(
+    ctx: typer.Context,
+    path: str = typer.Argument(".", help="Directory to index."),
+    force: bool = typer.Option(False, "--force", help="Force full reindex."),
+    extensions: list[str] = typer.Option(
+        None,
+        "--extensions",
+        help="File extensions (repeat or comma-separated).",
+    ),
+    include: list[str] = typer.Option(
+        (),
+        "--include",
+        help="Include glob patterns.",
+    ),
+    exclude: list[str] = typer.Option(
+        (),
+        "--exclude",
+        help="Exclude glob patterns.",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON."),
+) -> None:
+    from pathlib import Path as PathLib
+
+    from .indexer import TANTIVY_AVAILABLE, IndexConfig, RlmIndexer
+
+    json_mode = _resolve_json_mode(ctx, None, json_output)
+
+    if not TANTIVY_AVAILABLE:
+        error = IndexError(
+            "Tantivy is not installed.",
+            why="The 'tantivy' package is required for search functionality.",
+            fix="Install with: pip install 'rlm-cli[search]'",
+        )
+        _handle_cli_error(error, json_mode, None)
+        return
+
+    try:
+        root = PathLib(path).resolve()
+        if not root.exists():
+            raise IndexError(
+                "Directory not found.",
+                why=f"'{path}' does not exist.",
+                fix="Check the path and try again.",
+            )
+        if not root.is_dir():
+            raise IndexError(
+                "Not a directory.",
+                why=f"'{path}' is a file, not a directory.",
+                fix="Provide a directory path.",
+            )
+
+        walk_opts = WalkOptions(
+            extensions=_parse_extensions(extensions),
+            include_globs=_flatten_list(include),
+            exclude_globs=_flatten_list(exclude),
+            respect_gitignore=True,
+            include_hidden=False,
+            follow_symlinks=False,
+            max_file_bytes=DEFAULT_MAX_FILE_BYTES,
+            max_total_bytes=DEFAULT_MAX_TOTAL_BYTES,
+            binary_policy="skip",
+            exclude_lockfiles=True,
+            encoding="utf-8",
+            use_markitdown=False,
+        )
+
+        indexer = RlmIndexer(root, IndexConfig())
+        result = indexer.index_directory(walk_opts, force=force)
+
+        if json_mode:
+            payload = build_output(
+                ok=True,
+                exit_code=0,
+                result={
+                    "indexed": result.indexed_count,
+                    "skipped": result.skipped_count,
+                    "total_bytes": result.total_bytes,
+                    "index_path": str(result.index_path) if result.index_path else None,
+                },
+                warnings=result.warnings,
+            )
+            emit_json(payload)
+        else:
+            emit_text(
+                f"Indexed {result.indexed_count} files ({result.skipped_count} unchanged)\n"
+                f"Total: {result.total_bytes:,} bytes\n"
+                f"Index: {result.index_path}",
+                warnings=result.warnings,
+            )
+    except CliError as exc:
+        _handle_cli_error(exc, json_mode, None)
+
+
+@app.command(help="Search indexed documents.")
+def search(
+    ctx: typer.Context,
+    query: str = typer.Argument(..., help="Search query."),
+    path: str = typer.Option(".", "--path", "-p", help="Directory to search."),
+    limit: int = typer.Option(20, "--limit", "-n", help="Max results."),
+    language: str | None = typer.Option(None, "--language", "-l", help="Filter by language."),
+    paths_only: bool = typer.Option(False, "--paths-only", help="Output paths only."),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON."),
+) -> None:
+    from pathlib import Path as PathLib
+
+    from .indexer import TANTIVY_AVAILABLE, IndexConfig, RlmIndexer
+
+    json_mode = _resolve_json_mode(ctx, None, json_output)
+
+    if not TANTIVY_AVAILABLE:
+        error = IndexError(
+            "Tantivy is not installed.",
+            why="The 'tantivy' package is required for search functionality.",
+            fix="Install with: pip install 'rlm-cli[search]'",
+        )
+        _handle_cli_error(error, json_mode, None)
+        return
+
+    try:
+        root = PathLib(path).resolve()
+        if not root.exists():
+            raise IndexError(
+                "Directory not found.",
+                why=f"'{path}' does not exist.",
+                fix="Check the path and try again.",
+            )
+
+        indexer = RlmIndexer(root, IndexConfig())
+        results = indexer.search(query, limit=limit, language=language)
+
+        if json_mode:
+            payload = build_output(
+                ok=True,
+                exit_code=0,
+                result={
+                    "query": query,
+                    "count": len(results),
+                    "results": [
+                        {
+                            "path": r.path,
+                            "score": r.score,
+                            "language": r.language,
+                            "doc_id": r.doc_id,
+                            "bytes_size": r.bytes_size,
+                        }
+                        for r in results
+                    ],
+                },
+                warnings=[],
+            )
+            emit_json(payload)
+        elif paths_only:
+            for r in results:
+                typer.echo(r.path)
+        else:
+            if not results:
+                emit_text("No results found.")
+            else:
+                lines = [f"Found {len(results)} result(s) for '{query}':", ""]
+                for r in results:
+                    lines.append(f"  {r.path} ({r.language}, score: {r.score:.2f})")
+                emit_text("\n".join(lines))
+    except CliError as exc:
+        _handle_cli_error(exc, json_mode, None)
+
+
 def _run_ask(
     ctx: typer.Context,
     inputs: list[str],
@@ -422,6 +607,9 @@ def _run_ask(
     hidden: bool | None,
     follow_symlinks: bool | None,
     markitdown: bool,
+    search_query: str | None,
+    search_limit: int,
+    no_index: bool,
     backend_arg: Iterable[str],
     env_arg: Iterable[str],
     rlm_arg: Iterable[str],
@@ -498,6 +686,51 @@ def _run_ask(
             options=walk_opts,
             dir_mode=dir_mode or "docs",
         )
+
+        # Auto-index and optionally filter by search
+        if search_query or not no_index:
+            from .indexer import TANTIVY_AVAILABLE, IndexConfig, RlmIndexer, filter_files_by_search
+            from .inputs import InputKind
+
+            # Find directory inputs for indexing
+            dir_roots = [
+                s.value for s in sources
+                if s.kind == InputKind.DIR and isinstance(s.value, Path)
+            ]
+
+            if dir_roots and TANTIVY_AVAILABLE and not no_index:
+                # Auto-index directories
+                for dir_root in dir_roots:
+                    indexer = RlmIndexer(dir_root, IndexConfig())
+                    indexer.index_directory(walk_opts, force=False)
+
+            # Filter by search query if provided
+            if search_query and context_result.files:
+                if dir_roots:
+                    root_for_search = dir_roots[0]
+                else:
+                    root_for_search = Path.cwd()
+
+                filtered_files = filter_files_by_search(
+                    context_result.files,
+                    search_query,
+                    root_for_search,
+                    IndexConfig(),
+                    search_limit,
+                )
+                # Rebuild context payload with filtered files
+                from .context import build_context_payload
+                existing_notes = None
+                if isinstance(context_payload, dict):
+                    notes_val = context_payload.get("notes")
+                    if isinstance(notes_val, dict):
+                        existing_notes = notes_val
+                context_payload = build_context_payload(
+                    root=root_for_search,
+                    files=filtered_files,
+                    notes=existing_notes,
+                )
+                context_result.files = filtered_files
 
         context_payload_obj: object = context_payload
         if (dir_mode or "docs") == "files":

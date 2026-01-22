@@ -75,6 +75,27 @@ def run_doctor(*, json_mode: bool) -> dict[str, Any]:
             }
         )
 
+    try:
+        import tantivy  # noqa: F401
+
+        checks.append(
+            {
+                "name": "tantivy_available",
+                "ok": True,
+                "detail": "imported",
+                "hint": "",
+            }
+        )
+    except Exception:
+        checks.append(
+            {
+                "name": "tantivy_available",
+                "ok": False,
+                "detail": "not importable",
+                "hint": "Install tantivy for search: pip install 'rlm-cli[search]'",
+            }
+        )
+
     prime_key = os.getenv("RLM_PRIME_API_KEY") or os.getenv("PRIME_API_KEY")
     checks.append(
         {
