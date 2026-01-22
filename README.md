@@ -8,21 +8,19 @@ Upstream RLM: https://github.com/alexzhang13/rlm
 
 This repo includes a Claude Code plugin with an `rlm` skill. The skill teaches Claude how to use the rlm CLI for code analysis, diff reviews, and codebase exploration.
 
-### Install as local plugin
+### Installation
 
-```bash
-# Clone the repo
-git clone https://github.com/rawwerks/rlm-cli.git
-
-# Create local-plugins directory if needed
-mkdir -p ~/.claude/local-plugins
-
-# Remove existing rlm plugin if present, then symlink
-rm -rf ~/.claude/local-plugins/rlm
-ln -s "$(pwd)/rlm-cli" ~/.claude/local-plugins/rlm
+**Claude Code (Interactive)**
+```
+/plugin marketplace add rawwerks/rlm-cli
+/plugin install rlm@rlm-cli
 ```
 
-Restart Claude Code to load the plugin.
+**Claude CLI**
+```bash
+claude plugin marketplace add rawwerks/rlm-cli
+claude plugin install rlm@rlm-cli
+```
 
 ### What the skill provides
 

@@ -1,0 +1,21 @@
+{
+  "name": "rlm-cli",
+  "owner": {
+    "name": "rawwerks",
+    "url": "https://github.com/rawwerks"
+  },
+  "plugins": [
+    {
+      "name": "rlm",
+      "source": "./",
+      "description": "CLI for querying LLMs with file/directory/URL context for code analysis, diff reviews, and codebase exploration",
+      "strict": false,
+      "keywords": ["llm", "cli", "code-analysis", "diff-review", "context"],
+      "skills": ["./skills/rlm"]
+    }
+  ],
+  "metadata": {
+    "description": "Marketplace for the rlm CLI skill",
+    "version": "1.0.0"
+  }
+}
