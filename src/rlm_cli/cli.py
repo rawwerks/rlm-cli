@@ -62,6 +62,30 @@ Input modes:
   - use --path to force filesystem interpretation.
 """
 
+# System prompt template for search tool when Tantivy index is available
+# Use SEARCH_TOOL_PROMPT_TEMPLATE.format(indexed_root=...) to fill in the path
+SEARCH_TOOL_PROMPT_TEMPLATE = """\
+
+Additionally, you have access to a Tantivy full-text search index of the codebase.
+You can use it in the REPL to find relevant files before diving into the context:
+
+```repl
+from rlm_cli.indexer import RlmIndexer, IndexConfig
+from pathlib import Path
+
+# Initialize the indexer with the indexed root path
+indexer = RlmIndexer(Path("{indexed_root}"), IndexConfig())
+
+# Search for relevant files
+results = indexer.search("error handling", limit=20)
+for r in results:
+    print(f"{{r.path}} (score: {{r.score:.2f}}, lang: {{r.language}})")
+```
+
+The search uses BM25 ranking to find the most relevant files.
+Use this to narrow down which parts of the context to focus on.
+"""
+
 app = typer.Typer(
     add_completion=False,
     help="Run RLM completions with optional context.",
@@ -186,20 +210,10 @@ def ask(
         "--markitdown/--no-markitdown",
         help="Convert URLs and non-text files to Markdown when possible.",
     ),
-    search_query: str | None = typer.Option(
-        None,
-        "--search",
-        help="Filter context via full-text search query.",
-    ),
-    search_limit: int = typer.Option(
-        50,
-        "--search-limit",
-        help="Maximum documents from search filter.",
-    ),
     no_index: bool = typer.Option(
         False,
         "--no-index",
-        help="Skip auto-indexing directories.",
+        help="Skip auto-indexing directories (search tool still available).",
     ),
     backend_arg: list[str] = typer.Option(
         (),
@@ -276,8 +290,6 @@ def ask(
         hidden,
         follow_symlinks,
         markitdown,
-        search_query,
-        search_limit,
         no_index,
         backend_arg,
         env_arg,
@@ -607,8 +619,6 @@ def _run_ask(
     hidden: bool | None,
     follow_symlinks: bool | None,
     markitdown: bool,
-    search_query: str | None,
-    search_limit: int,
     no_index: bool,
     backend_arg: Iterable[str],
     env_arg: Iterable[str],
@@ -687,9 +697,11 @@ def _run_ask(
             dir_mode=dir_mode or "docs",
         )
 
-        # Auto-index and optionally filter by search
-        if search_query or not no_index:
-            from .indexer import TANTIVY_AVAILABLE, IndexConfig, RlmIndexer, filter_files_by_search
+        # Auto-index directories so search tool is available to the LLM
+        search_tool_available = False
+        indexed_root: Path | None = None
+        if not no_index:
+            from .indexer import TANTIVY_AVAILABLE, IndexConfig, RlmIndexer
             from .inputs import InputKind
 
             # Find directory inputs for indexing
@@ -698,39 +710,25 @@ def _run_ask(
                 if s.kind == InputKind.DIR and isinstance(s.value, Path)
             ]
 
-            if dir_roots and TANTIVY_AVAILABLE and not no_index:
-                # Auto-index directories
+            if dir_roots and TANTIVY_AVAILABLE:
+                # Auto-index directories (use first directory as the indexed root)
+                indexed_root = dir_roots[0].resolve()
                 for dir_root in dir_roots:
                     indexer = RlmIndexer(dir_root, IndexConfig())
                     indexer.index_directory(walk_opts, force=False)
+                search_tool_available = True
 
-            # Filter by search query if provided
-            if search_query and context_result.files:
-                if dir_roots:
-                    root_for_search = dir_roots[0]
-                else:
-                    root_for_search = Path.cwd()
-
-                filtered_files = filter_files_by_search(
-                    context_result.files,
-                    search_query,
-                    root_for_search,
-                    IndexConfig(),
-                    search_limit,
+        # Build custom system prompt with search tool appended if available
+        custom_system_prompt = None
+        if search_tool_available and indexed_root:
+            try:
+                from rlm.utils.prompts import RLM_SYSTEM_PROMPT
+                search_prompt = SEARCH_TOOL_PROMPT_TEMPLATE.format(
+                    indexed_root=str(indexed_root)
                 )
-                # Rebuild context payload with filtered files
-                from .context import build_context_payload
-                existing_notes = None
-                if isinstance(context_payload, dict):
-                    notes_val = context_payload.get("notes")
-                    if isinstance(notes_val, dict):
-                        existing_notes = notes_val
-                context_payload = build_context_payload(
-                    root=root_for_search,
-                    files=filtered_files,
-                    notes=existing_notes,
-                )
-                context_result.files = filtered_files
+                custom_system_prompt = RLM_SYSTEM_PROMPT + search_prompt
+            except ImportError:
+                pass  # RLM not available, skip search tool prompt
 
         context_payload_obj: object = context_payload
         if (dir_mode or "docs") == "files":
@@ -795,6 +793,7 @@ def _run_ask(
                     model=resolved_model or None,
                     log_dir=resolved_log_dir,
                     verbose=effective_verbose,
+                    custom_system_prompt=custom_system_prompt,
                 )
             elapsed_ms = int((time.monotonic() - start) * 1000)
             payload = build_output(
@@ -835,6 +834,7 @@ def _run_ask(
                 model=resolved_model or None,
                 log_dir=resolved_log_dir,
                 verbose=effective_verbose,
+                custom_system_prompt=custom_system_prompt,
             )
             _emit_text_output(result.response, output, context_result.warnings)
     except CliError as exc:

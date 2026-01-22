@@ -36,6 +36,7 @@ def run_completion(
     model: str | None = None,
     log_dir: str | None = None,
     verbose: bool = False,
+    custom_system_prompt: str | None = None,
 ) -> RlmResult:
     try:
         from rlm import RLM
@@ -66,6 +67,8 @@ def run_completion(
         rlm_init_kwargs["logger"] = logger
     if verbose and (not rlm_kwargs or "verbose" not in rlm_kwargs):
         rlm_init_kwargs["verbose"] = True
+    if custom_system_prompt:
+        rlm_init_kwargs["custom_system_prompt"] = custom_system_prompt
     if rlm_kwargs:
         rlm_init_kwargs.update(rlm_kwargs)
 
