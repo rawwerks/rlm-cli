@@ -41,6 +41,12 @@ export OPENROUTER_API_KEY=sk-or-...
 rlm ask . -q "Summarize this repo" --json
 ```
 
+### Ask about a URL (auto-Markdown)
+
+```bash
+rlm ask https://www.anthropic.com/constitution -q "Summarize this page" --json
+```
+
 ### Ask about a file
 
 ```bash
@@ -73,6 +79,7 @@ rlm complete "Say hello" --backend openrouter --model z-ai/glm-4.7:turbo --json
 - `--backend-arg/--env-arg/--rlm-arg KEY=VALUE` pass extra kwargs.
 - `--backend-json/--env-json/--rlm-json @file.json` merge JSON kwargs.
 - `--literal` treats inputs as literal text; `--path` forces filesystem paths.
+- `--markitdown/--no-markitdown` toggles URL and non-text conversion to Markdown.
 - `--verbose` or `--debug` enables verbose backend logging.
 
 ## Directory loading

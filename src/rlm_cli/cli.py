@@ -181,6 +181,11 @@ def ask(
         "--follow-symlinks/--no-follow-symlinks",
         help="Follow symlinks when walking directories.",
     ),
+    markitdown: bool = typer.Option(
+        True,
+        "--markitdown/--no-markitdown",
+        help="Convert URLs and non-text files to Markdown when possible.",
+    ),
     backend_arg: list[str] = typer.Option(
         (),
         "--backend-arg",
@@ -255,6 +260,7 @@ def ask(
         binary,
         hidden,
         follow_symlinks,
+        markitdown,
         backend_arg,
         env_arg,
         rlm_arg,
@@ -415,6 +421,7 @@ def _run_ask(
     binary: str | None,
     hidden: bool | None,
     follow_symlinks: bool | None,
+    markitdown: bool,
     backend_arg: Iterable[str],
     env_arg: Iterable[str],
     rlm_arg: Iterable[str],
@@ -484,6 +491,7 @@ def _run_ask(
             binary_policy=binary or "skip",
             exclude_lockfiles=True,
             encoding=encoding or "utf-8",
+            use_markitdown=markitdown,
         )
         context_payload, context_result = build_context_from_sources(
             sources,

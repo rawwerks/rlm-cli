@@ -15,6 +15,7 @@ class InputKind(str, Enum):
     FILE = "file"
     DIR = "dir"
     LITERAL = "literal"
+    URL = "url"
 
 
 @dataclass(frozen=True)
@@ -68,6 +69,9 @@ def parse_input_source(
 
     if literal:
         return InputSource(InputKind.LITERAL, token)
+
+    if token.startswith(("http://", "https://")):
+        return InputSource(InputKind.URL, token)
 
     resolved = _parse_path(token, required=False)
     if resolved:

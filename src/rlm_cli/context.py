@@ -44,6 +44,7 @@ class WalkOptions:
     binary_policy: str = "skip"
     exclude_lockfiles: bool = False
     encoding: str = "utf-8"
+    use_markitdown: bool = True
 
 
 @dataclass(frozen=True)
@@ -244,6 +245,11 @@ def build_context_from_sources(
             combined.warnings.extend(result.warnings)
             combined.truncated = combined.truncated or result.truncated
             combined.total_bytes += result.total_bytes
+        elif source.kind == InputKind.URL and isinstance(source.value, str):
+            entry = _load_url_entry(source.value, opts, combined)
+            if entry is not None:
+                literal_docs.append(entry)
+                combined.total_bytes += entry.size
 
     combined.files.extend(literal_docs)
     combined.files.sort(key=lambda entry: entry.path.as_posix())
@@ -380,6 +386,14 @@ def _load_file_entry(path: Path, opts: WalkOptions) -> FileEntry | None:
     if opts.max_file_bytes is not None and size > opts.max_file_bytes:
         return None
     if _is_binary(path):
+        if opts.use_markitdown:
+            converted = _convert_with_markitdown(str(path))
+            if converted is not None:
+                return FileEntry(
+                    path=path,
+                    size=len(converted.encode(opts.encoding)),
+                    content=converted,
+                )
         if opts.binary_policy == "error":
             raise InputError(
                 "Binary file detected.",
@@ -411,4 +425,33 @@ def _build_notes(
         "respect_gitignore": opts.respect_gitignore,
         "dir_mode": dir_mode,
         "truncated": result.truncated,
+        "markitdown": opts.use_markitdown,
     }
+
+
+def _load_url_entry(url: str, opts: WalkOptions, result: WalkResult) -> FileEntry | None:
+    if not opts.use_markitdown:
+        result.warnings.append(f"Skipping URL {url} (markitdown disabled).")
+        return None
+    converted = _convert_with_markitdown(url)
+    if converted is None:
+        result.warnings.append(f"Failed to convert URL {url} with markitdown.")
+        return None
+    return FileEntry(
+        path=Path(url),
+        size=len(converted.encode(opts.encoding)),
+        content=converted,
+    )
+
+
+def _convert_with_markitdown(source: str) -> str | None:
+    try:
+        from markitdown import MarkItDown
+    except Exception:
+        return None
+    try:
+        converter = MarkItDown()
+        result = converter.convert(source)
+        return getattr(result, "text_content", None)
+    except Exception:
+        return None
