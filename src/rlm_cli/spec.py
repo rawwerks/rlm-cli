@@ -64,7 +64,7 @@ def _rlm_version() -> str:
 
 def _rlm_signature() -> str | None:
     try:
-        from rlm import RLM  # type: ignore[attr-defined]
+        from rlm import RLM
 
         return str(inspect.signature(RLM.__init__))
     except Exception:
