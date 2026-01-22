@@ -88,6 +88,40 @@ rlm complete "Say hello" --backend openrouter --model z-ai/glm-4.7:turbo --json
 - `--markitdown/--no-markitdown` toggles URL and non-text conversion to Markdown.
 - `--verbose` or `--debug` enables verbose backend logging.
 
+## Search (optional)
+
+Full-text search via Tantivy for filtering large directories before LLM calls.
+
+### Install search support
+
+```bash
+pip install 'rlm-cli[search]'
+```
+
+### Index a directory
+
+```bash
+rlm index ./src
+```
+
+### Search indexed documents
+
+```bash
+rlm search "error handling" --path ./src
+```
+
+### Filter context via search
+
+```bash
+rlm ask ./src -q "Explain error handling" --search "exception"
+```
+
+Options:
+- `--search "query"` - Filter context via BM25 search
+- `--search-limit N` - Max documents from search (default: 50)
+- `--no-index` - Skip auto-indexing directories
+- `--force` - Force full reindex (with `rlm index`)
+
 ## Directory loading
 
 Defaults for `rlm ask`:
@@ -114,6 +148,7 @@ Precedence: CLI flags > env vars > config > defaults.
 - `11` config error
 - `20` backend error
 - `30` runtime error
+- `40` index error (search)
 
 ## Security
 
