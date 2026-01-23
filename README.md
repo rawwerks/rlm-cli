@@ -117,7 +117,17 @@ rlm complete "Say hello" --backend openrouter --model z-ai/glm-4.7:turbo --json
 - `--markitdown/--no-markitdown` toggles URL and non-text conversion to Markdown.
 - `--verbose` or `--debug` enables verbose backend logging.
 
-## Search (optional)
+## Search Tools
+
+Three search tools are available for the LLM to explore content:
+
+| Tool | Cost | Privacy | Best For |
+|------|------|---------|----------|
+| `rg.*` | Free | Local | Exact patterns, function names, imports |
+| `tv.*` | Free | Local | Topics, concepts, finding related files |
+| `pi.*` | **$$ LLM calls** | **Sends to API** | Hierarchical document navigation (PDFs) |
+
+### Local Search (rg.* and tv.*)
 
 Full-text search via Tantivy and ripgrep for the LLM to explore codebases efficiently.
 
@@ -170,6 +180,61 @@ rlm search "error handling" --path ./src
 Options:
 - `--no-index` - Skip auto-indexing directories
 - `--force` - Force full reindex (with `rlm index`)
+
+### PageIndex (pi.* - Opt-in)
+
+Hierarchical document navigation for PDFs and structured documents.
+
+**⚠️ WARNING: PageIndex costs money and sends data to external APIs.**
+
+Unlike `rg.*` and `tv.*` which are free and local, PageIndex:
+- Sends document content to LLM APIs during indexing
+- Makes LLM calls during tree navigation
+- Requires explicit opt-in via `pi.configure(client)`
+
+**When to use PageIndex:**
+- Working with PDFs, reports, manuals, regulatory filings
+- Documents with natural hierarchical structure (chapters, sections)
+- When "find the section about X" is more useful than keyword search
+
+**Usage in REPL:**
+```python
+import sys
+sys.path.insert(0, "/path/to/rlm-cli/rlm")        # rlm submodule
+sys.path.insert(0, "/path/to/rlm-cli/pageindex")  # pageindex submodule
+
+from rlm.clients import get_client
+from rlm_cli.tools_pageindex import pi
+
+# 1. Configure with your rlm backend (REQUIRED before any operation)
+client = get_client(backend="openrouter", backend_kwargs={"model_name": "google/gemini-2.0-flash-001"})
+pi.configure(client)
+
+# 2. Index a PDF (⚠️ COSTS MONEY - no caching, re-indexes each call)
+tree = pi.index(path="annual_report.pdf")
+# Returns: PITree(doc_name, nodes, doc_description, raw)
+
+# 3. View table of contents (FREE - uses in-memory tree)
+print(pi.toc(tree))
+
+# 4. Get specific section by node_id (FREE)
+# Node IDs are sequential: "0000", "0001", "0002", etc.
+section = pi.get_section(tree, "0003")
+if section:
+    print(f"{section.title}: pages {section.start_index}-{section.end_index}")
+# Returns: PINode(title, node_id, start_index, end_index, summary, children) or None
+```
+
+**pi.* API:**
+| Method | Cost | Returns | Description |
+|--------|------|---------|-------------|
+| `pi.configure(client)` | Free | None | Set rlm backend (required first) |
+| `pi.index(path=...)` | **$$$** | PITree | Build tree index from PDF |
+| `pi.toc(tree)` | Free | str | Display table of contents |
+| `pi.get_section(tree, id)` | Free | PINode/None | Get section by node_id |
+| `pi.status()` | Free | dict | Check availability and config |
+
+**Note:** PageIndex extracts document structure, not content. Use `start_index`/`end_index` to locate sections in the original PDF.
 
 ## Directory loading
 

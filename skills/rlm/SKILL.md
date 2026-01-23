@@ -152,7 +152,103 @@ max_iterations: 30
 
 When `rlm ask` runs on a directory, the LLM gets search tools:
 
-- **rg.search(pattern, paths, globs)** - ripgrep for exact patterns, function names, imports
-- **tv.search(query, limit)** - Tantivy BM25 for concepts, topics, related files
+| Tool | Cost | Privacy | Use For |
+|------|------|---------|---------|
+| `rg.search()` | Free | Local | Exact patterns, function names, imports |
+| `tv.search()` | Free | Local | Topics, concepts, related files |
+| `pi.*` | **$$$** | **API** | Hierarchical PDF/document navigation |
 
-The LLM uses these automatically to explore before answering.
+### Free Local Tools (auto-loaded)
+
+- **rg.search(pattern, paths, globs)** - ripgrep for exact patterns
+- **tv.search(query, limit)** - Tantivy BM25 for concepts
+
+### PageIndex (pi.* - Opt-in, Costs Money)
+
+⚠️ **WARNING**: PageIndex sends document content to LLM APIs and costs money.
+
+**Only use when:**
+1. User explicitly requests document/PDF analysis
+2. Document has hierarchical structure (reports, manuals)
+3. User accepts cost/privacy tradeoffs
+
+**Prerequisites:**
+- `OPENROUTER_API_KEY` (or other backend key) must be set in environment
+- PageIndex submodule must be initialized
+- Run within rlm-cli's virtual environment (has required dependencies)
+
+**Setup (REQUIRED before any pi.* operation):**
+```python
+import sys
+sys.path.insert(0, "/path/to/rlm-cli/rlm")        # rlm submodule
+sys.path.insert(0, "/path/to/rlm-cli/pageindex")  # pageindex submodule
+
+from rlm.clients import get_client
+from rlm_cli.tools_pageindex import pi
+
+# Configure with existing rlm backend
+client = get_client(backend="openrouter", backend_kwargs={"model_name": "google/gemini-2.0-flash-001"})
+pi.configure(client)
+```
+
+**Indexing (costs $$$):**
+```python
+# Build tree index - THIS COSTS MONEY (no caching, re-indexes each call)
+tree = pi.index(path="report.pdf")
+# Returns: PITree object with doc_name, nodes, doc_description, raw
+```
+
+**Viewing structure (free after indexing):**
+```python
+# Display table of contents
+print(pi.toc(tree))
+
+# Get section by node_id (IDs are "0000", "0001", "0002", etc.)
+section = pi.get_section(tree, "0003")
+# Returns: PINode with title, node_id, start_index, end_index, summary, children
+# Returns: None if not found
+
+if section:
+    print(f"{section.title}: pages {section.start_index}-{section.end_index}")
+```
+
+**Finding node IDs:**
+Node IDs are assigned sequentially ("0000", "0001", ...) in tree traversal order.
+To see all node IDs, access the raw tree structure:
+```python
+import json
+print(json.dumps(tree.raw["structure"], indent=2))
+# Each node has: title, node_id, start_index, end_index
+```
+
+**pi.* API Reference:**
+| Method | Cost | Returns | Description |
+|--------|------|---------|-------------|
+| `pi.configure(client)` | Free | None | Set rlm backend (REQUIRED first) |
+| `pi.status()` | Free | dict | Check availability, config, warning |
+| `pi.index(path=str)` | $$$ | PITree | Build tree from PDF |
+| `pi.toc(tree, max_depth=3)` | Free | str | Formatted table of contents |
+| `pi.get_section(tree, node_id)` | Free | PINode or None | Get section by ID |
+| `pi.available()` | Free | bool | Check if PageIndex installed |
+| `pi.configured()` | Free | bool | Check if client configured |
+
+**PITree attributes:** `doc_name`, `nodes` (list of PINode), `doc_description`, `raw` (dict)
+**PINode attributes:** `title`, `node_id`, `start_index`, `end_index`, `summary` (may be None), `children` (may be None)
+
+**Notes:**
+- `summary` is only populated if `add_summaries=True` in `pi.index()`
+- `children` is None for leaf nodes (sections with no subsections)
+- `tree.raw["structure"]` is a flat list; hierarchy is in PINode.children
+- PageIndex extracts document structure (TOC), not content. Use page numbers to locate sections in the original PDF.
+
+**Example output from pi.toc():**
+```
+📄 annual_report.pdf
+
+• Executive Summary (p.1-5)
+• Financial Overview (p.6-20)
+  • Revenue (p.6-10)
+  • Expenses (p.11-15)
+  • Projections (p.16-20)
+• Risk Factors (p.21-35)
+```
