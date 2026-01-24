@@ -124,12 +124,24 @@ rlm complete "Say hello" --backend openrouter --model z-ai/glm-4.7:turbo --json
 
 ### Recursive RLM Calls (`--max-depth`)
 
-RLM can recursively call itself to handle complex tasks. When `--max-depth` > 1, the LLM's `llm_query()` function creates child RLM instances with `max_depth - 1`.
+RLM can recursively call itself to handle complex tasks. When `--max-depth` > 1, the LLM's `llm_query()` function creates child RLM instances instead of plain LLM completions.
 
 ```bash
 # Enable 2 levels of recursive calls
 rlm ask . -q "Research this codebase thoroughly" --max-depth 2
 ```
+
+**Model routing in subcalls:** Child RLMs can use different models for cost optimization:
+```python
+# In REPL code, specify a cheaper model for simple subtasks
+result = llm_query("What is 2+3?", model="google/gemini-2.0-flash-001")
+```
+
+**Limit propagation:** Child RLMs inherit limits from their parent:
+- `max_budget`: Remaining budget (parent budget minus spent)
+- `max_timeout`: Remaining time (parent timeout minus elapsed)
+- `max_tokens`: Same as parent
+- `max_errors`: Same as parent
 
 ### Budget Control (`--max-budget`)
 
@@ -151,7 +163,10 @@ The RLM execution can stop for any of these reasons:
 1. **Final answer found** - LLM calls `FINAL_VAR()` with result
 2. **Max iterations reached** - Exceeds `--max-iterations` (graceful, forces final answer)
 3. **Max budget exceeded** - Spending exceeds `--max-budget` (exit code 20, error with details)
-4. **Max depth reached** - Child RLM at depth 0 cannot recurse further
+4. **Max timeout exceeded** - Exceeds `--max-timeout` seconds (returns best partial answer)
+5. **Max tokens exceeded** - Exceeds `--max-tokens` total tokens (returns best partial answer)
+6. **Max errors exceeded** - Exceeds `--max-errors` consecutive errors (returns best partial answer)
+7. **Max depth reached** - Child RLM at depth limit falls back to plain LLM completion
 
 **Note:** Max iterations is a soft limit. When exceeded, RLM prompts the LLM to provide a final answer. Modern LLMs typically complete in 1-2 iterations.
 
