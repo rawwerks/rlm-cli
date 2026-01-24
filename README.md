@@ -119,6 +119,52 @@ rlm complete "Say hello" --backend openrouter --model z-ai/glm-4.7:turbo --json
 - `--literal` treats inputs as literal text; `--path` forces filesystem paths.
 - `--markitdown/--no-markitdown` toggles URL and non-text conversion to Markdown.
 - `--verbose` or `--debug` enables verbose backend logging.
+- `--inject-file FILE` executes Python code between iterations (update variables mid-run).
+
+## Early Exit and Cancellation
+
+### Ctrl+C (Reply Now)
+
+Pressing Ctrl+C during execution returns the best partial answer as success (exit code 0) instead of raising an error. This is useful when you want to stop waiting but keep what the LLM has produced so far.
+
+```bash
+rlm ask . -q "Analyze in detail" --max-iterations 20
+# Press Ctrl+C after a few iterations
+# Output: partial answer with exit_code=0, early_exit=true
+```
+
+In JSON mode, the result includes `early_exit` and `early_exit_reason` fields:
+```json
+{"ok": true, "result": {"response": "...", "early_exit": true, "early_exit_reason": "user_cancelled"}}
+```
+
+### SIGUSR1 (Programmatic Early Exit)
+
+Send SIGUSR1 to request graceful early exit without using Ctrl+C:
+
+```bash
+# In another terminal
+kill -SIGUSR1 <rlm_pid>
+```
+
+This is useful for programmatic control over long-running RLM tasks.
+
+### --inject-file (Update Variables Mid-Run)
+
+The `--inject-file` option executes Python code between iterations, allowing you to update REPL variables while the RLM is running.
+
+```bash
+# Create inject file
+echo 'focus = "authentication"' > inject.py
+
+# Start RLM with inject file
+rlm ask . -q "Analyze based on the 'focus' variable" --inject-file inject.py
+
+# In another terminal, update the focus mid-run
+echo 'focus = "authorization"' > inject.py
+```
+
+The inject file is checked before each iteration. If modified, its contents are executed in the REPL environment. This "pulls the rug out" from under the LLM - past iterations already happened, but future iterations see the updated state.
 
 ## Recursion and Budget Limits
 

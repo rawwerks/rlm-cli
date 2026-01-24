@@ -20,6 +20,8 @@ _FLOAT_RE = re.compile(r"^[+-]?\d+\.\d+([eE][+-]?\d+)?$")
 class RlmResult:
     response: str
     raw: object
+    early_exit: bool = False
+    early_exit_reason: str | None = None
 
 
 def run_completion(
@@ -41,6 +43,7 @@ def run_completion(
     log_dir: str | None = None,
     verbose: bool = False,
     custom_system_prompt: str | None = None,
+    inject_file: str | None = None,
 ) -> RlmResult:
     try:
         from rlm import RLM
@@ -59,13 +62,18 @@ def run_completion(
     if model and "model_name" not in backend_payload:
         backend_payload["model_name"] = model
 
+    # Build environment kwargs, optionally adding inject_file
+    env_kwargs = dict(environment_kwargs or {})
+    if inject_file:
+        env_kwargs["inject_file"] = inject_file
+
     rlm_init_kwargs: dict[str, object] = {
         "backend": backend,
         "environment": environment,
         "max_iterations": max_iterations,
         "max_depth": max_depth,
         "backend_kwargs": backend_payload,
-        "environment_kwargs": dict(environment_kwargs or {}),
+        "environment_kwargs": env_kwargs,
     }
     if max_budget is not None:
         rlm_init_kwargs["max_budget"] = max_budget
@@ -176,14 +184,20 @@ def run_completion(
                 try_steps=["rlm doctor --json"],
             ) from exc
 
-        # User cancellation
+        # User cancellation - return partial answer as success if available
         if exc_name == "CancellationError":
-            why = "Execution cancelled by user (Ctrl+C)"
             if partial:
-                why += f" (partial answer available: {len(partial)} chars)"
+                # Return partial answer as success (exit code 0)
+                return RlmResult(
+                    response=str(partial),
+                    raw=None,
+                    early_exit=True,
+                    early_exit_reason="user_cancelled",
+                )
+            # No partial answer available - raise error
             raise BackendError(
                 "RLM completion cancelled.",
-                why=why,
+                why="Execution cancelled by user (Ctrl+C) - no partial answer available",
                 fix="Re-run the command to continue.",
                 try_steps=[],
             ) from exc

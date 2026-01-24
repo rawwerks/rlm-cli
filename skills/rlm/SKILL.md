@@ -56,6 +56,7 @@ rlm ask <inputs> -q "question"
 | `--max-errors N` | Consecutive error limit before stopping |
 | `--no-index` | Skip auto-indexing |
 | `--exa` | Enable Exa web search (requires `EXA_API_KEY`) |
+| `--inject-file FILE` | Execute Python code between iterations |
 
 **JSON output structure:**
 ```json
@@ -206,12 +207,31 @@ FINAL_VAR(result)  # passing the dict directly causes AttributeError
 4. **Max timeout exceeded** - Time > `--max-timeout` (exit code 20, error with partial answer)
 5. **Max tokens exceeded** - Tokens > `--max-tokens` (exit code 20, error with partial answer)
 6. **Max errors exceeded** - Consecutive errors > `--max-errors` (exit code 20, error with partial answer)
-7. **User cancellation** - Ctrl+C (exit code 20, error with partial answer if available)
+7. **User cancellation** - Ctrl+C or SIGUSR1 (exit code 0, returns partial answer as success)
 8. **Max depth reached** - Child RLM at depth 0 cannot recurse further
 
 **Note on max iterations:** This is a soft limit. When exceeded, RLM prompts the LLM one more time to provide a final answer. Modern LLMs typically complete in 1-2 iterations.
 
-**Partial answers:** When timeout, tokens, errors, or cancellation stops execution, the error includes `partial_answer` if any response was generated before stopping.
+**Partial answers:** When timeout, tokens, or errors stop execution, the error includes `partial_answer` if any response was generated before stopping.
+
+**Early exit (Ctrl+C):** Pressing Ctrl+C (or sending SIGUSR1) returns the partial answer as success (exit code 0) with `early_exit: true` in the result.
+
+### Inject File (--inject-file)
+
+Update REPL variables mid-run by modifying an inject file:
+
+```bash
+# Create inject file
+echo 'focus = "authentication"' > inject.py
+
+# Run with inject file
+rlm ask . -q "Analyze based on 'focus'" --inject-file inject.py
+
+# In another terminal, update mid-run
+echo 'focus = "authorization"' > inject.py
+```
+
+The file is checked before each iteration and executed if modified.
 
 ## Exit Codes
 

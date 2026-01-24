@@ -1216,6 +1216,7 @@ def _run_complete(
                     model=resolved_model or None,
                     log_dir=resolved_log_dir,
                     verbose=effective_verbose,
+                    inject_file=inject_file,
                 )
             elapsed_ms = int((time.monotonic() - start) * 1000)
             result_data: dict[str, object] = {"response": result.response}
@@ -1264,6 +1265,7 @@ def _run_complete(
                 model=resolved_model or None,
                 log_dir=resolved_log_dir,
                 verbose=effective_verbose,
+                inject_file=inject_file,
             )
             warnings: list[str] = []
             if result.early_exit:
@@ -1494,3 +1496,7 @@ def _validate_openrouter_model(model: str, backend: str) -> None:
                 f"rlm models {model.split('/')[0]}",  # Filter by provider
             ],
         )
+
+
+if __name__ == "__main__":
+    app()
