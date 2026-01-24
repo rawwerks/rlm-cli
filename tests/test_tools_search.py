@@ -5,14 +5,18 @@ from pathlib import Path
 import pytest
 
 from rlm_cli.tools_search import (
+    EXA_AVAILABLE,
     RIPGREP_AVAILABLE,
     TANTIVY_AVAILABLE,
+    ExaHit,
     RGHit,
     TVHit,
+    exa,
     recall,
     rg,
     scan,
     tv,
+    web,
 )
 
 
@@ -175,3 +179,122 @@ class TestDataClasses:
             "language": "python",
             "bytes_size": 1024,
         }
+
+    def test_exa_hit_to_dict(self):
+        """Test ExaHit.to_dict()."""
+        hit = ExaHit(
+            url="https://example.com",
+            title="Example Page",
+            score=0.95,
+            published_date="2024-01-15",
+            author="John Doe",
+            text=None,
+            highlights=["relevant text excerpt"],
+        )
+        d = hit.to_dict()
+
+        assert d == {
+            "url": "https://example.com",
+            "title": "Example Page",
+            "score": 0.95,
+            "published_date": "2024-01-15",
+            "author": "John Doe",
+            "highlights": ["relevant text excerpt"],
+        }
+
+    def test_exa_hit_to_dict_minimal(self):
+        """Test ExaHit.to_dict() with minimal fields."""
+        hit = ExaHit(
+            url="https://example.com",
+            title="Example",
+            score=None,
+            published_date=None,
+            author=None,
+            text=None,
+            highlights=None,
+        )
+        d = hit.to_dict()
+
+        assert d == {
+            "url": "https://example.com",
+            "title": "Example",
+        }
+
+
+class TestExaSearch:
+    """Tests for exa.* Exa web search."""
+
+    def test_exa_available_check(self):
+        """Test that EXA_AVAILABLE reflects package installation."""
+        # This should be True if exa-py is installed, False otherwise
+        # The actual value depends on the test environment
+        assert isinstance(EXA_AVAILABLE, bool)
+
+    @pytest.mark.skipif(not EXA_AVAILABLE, reason="exa-py not installed")
+    def test_exa_available_method(self):
+        """Test exa.available() returns bool based on package and API key."""
+        result = exa.available()
+        assert isinstance(result, bool)
+        # If EXA_API_KEY is not set, this should be False
+        # If it is set, this should be True
+
+    @pytest.mark.skipif(not EXA_AVAILABLE, reason="exa-py not installed")
+    def test_exa_requires_api_key(self):
+        """Test that exa.search() raises error without API key."""
+        import os
+
+        # Save and clear the API key
+        saved_key = os.environ.pop("EXA_API_KEY", None)
+        try:
+            # Reset the cached client
+            import rlm_cli.tools_search as ts
+            ts._exa_client = None
+
+            with pytest.raises(ValueError, match="EXA_API_KEY"):
+                exa.search(query="test", limit=1)
+        finally:
+            # Restore the API key
+            if saved_key:
+                os.environ["EXA_API_KEY"] = saved_key
+
+    @pytest.mark.skipif(
+        not EXA_AVAILABLE or not exa.available(),
+        reason="exa-py not installed or EXA_API_KEY not set"
+    )
+    @pytest.mark.integration
+    def test_exa_search_basic(self):
+        """Test basic Exa search (requires API key)."""
+        results = exa.search(query="Python programming", limit=3)
+
+        assert len(results) > 0
+        assert all("url" in r for r in results)
+        assert all("title" in r for r in results)
+
+    @pytest.mark.skipif(
+        not EXA_AVAILABLE or not exa.available(),
+        reason="exa-py not installed or EXA_API_KEY not set"
+    )
+    @pytest.mark.integration
+    def test_exa_search_with_highlights(self):
+        """Test Exa search with highlights enabled."""
+        results = exa.search(
+            query="machine learning tutorial",
+            limit=2,
+            include_highlights=True,
+        )
+
+        assert len(results) > 0
+        # Results should have highlights
+        assert any(r.get("highlights") for r in results)
+
+    @pytest.mark.skipif(
+        not EXA_AVAILABLE or not exa.available(),
+        reason="exa-py not installed or EXA_API_KEY not set"
+    )
+    @pytest.mark.integration
+    def test_web_alias(self):
+        """Test that web() is an alias for exa.search()."""
+        results = web(query="Python asyncio", limit=2)
+
+        assert len(results) > 0
+        assert all("url" in r for r in results)

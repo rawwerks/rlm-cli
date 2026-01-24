@@ -24,6 +24,7 @@ dev = [
 ]
 rich = ["rich"]
 search = ["tantivy>=0.22.0", "python-ripgrep>=0.0.8"]
+exa = ["exa-py>=1.0"]
 
 [project.scripts]
 rlm = "rlm_cli.cli:app"

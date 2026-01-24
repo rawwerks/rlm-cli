@@ -55,6 +55,7 @@ rlm ask <inputs> -q "question"
 | `--max-tokens N` | Total token limit (input + output) |
 | `--max-errors N` | Consecutive error limit before stopping |
 | `--no-index` | Skip auto-indexing |
+| `--exa` | Enable Exa web search (requires `EXA_API_KEY`) |
 
 **JSON output structure:**
 ```json
@@ -189,8 +190,18 @@ rlm complete "Write code" --max-errors 3
 ### Stop Conditions
 
 RLM execution stops when any of these occur:
-1. **Final answer** - LLM calls `FINAL_VAR()` with result
+1. **Final answer** - LLM calls `FINAL_VAR("variable_name")` with the NAME of a variable (as a string)
 2. **Max iterations** - Exceeds `--max-iterations` (exit code 0, graceful - forces final answer)
+
+**FINAL_VAR usage** (common mistake - pass variable NAME, not value):
+```python
+# CORRECT:
+result = {"answer": "hello", "score": 42}
+FINAL_VAR("result")  # pass the variable NAME as a string
+
+# WRONG:
+FINAL_VAR(result)  # passing the dict directly causes AttributeError
+```
 3. **Max budget exceeded** - Spending > `--max-budget` (exit code 20, error)
 4. **Max timeout exceeded** - Time > `--max-timeout` (exit code 20, error with partial answer)
 5. **Max tokens exceeded** - Tokens > `--max-tokens` (exit code 20, error with partial answer)
@@ -222,12 +233,62 @@ When `rlm ask` runs on a directory, the LLM gets search tools:
 |------|------|---------|---------|
 | `rg.search()` | Free | Local | Exact patterns, function names, imports |
 | `tv.search()` | Free | Local | Topics, concepts, related files |
+| `exa.search()` | **$** | **API** | Web search (requires `--exa` flag) |
 | `pi.*` | **$$$** | **API** | Hierarchical PDF/document navigation |
 
 ### Free Local Tools (auto-loaded)
 
 - **rg.search(pattern, paths, globs)** - ripgrep for exact patterns
 - **tv.search(query, limit)** - Tantivy BM25 for concepts
+
+### Exa Web Search (--exa flag, Costs Money)
+
+⚠️ **Opt-in**: Requires `--exa` flag and `EXA_API_KEY` environment variable.
+
+**Setup:**
+```bash
+export EXA_API_KEY=...  # Get from https://exa.ai
+```
+
+**Usage in REPL:**
+```python
+from rlm_cli.tools_search import exa, web
+
+# Basic search
+results = exa.search(query="Python async patterns", limit=5)
+for r in results:
+    print(f"{r['title']}: {r['url']}")
+
+# With highlights (relevant excerpts)
+results = exa.search(
+    query="error handling best practices",
+    limit=3,
+    include_highlights=True
+)
+
+# Semantic alias
+results = web(query="machine learning tutorial", limit=5)
+
+# Find similar pages
+results = exa.find_similar(url="https://example.com/article", limit=5)
+```
+
+**exa.search() parameters:**
+| Param | Default | Description |
+|-------|---------|-------------|
+| `query` | required | Search query |
+| `limit` | 10 | Max results |
+| `search_type` | "auto" | "auto", "neural", or "keyword" |
+| `include_domains` | None | Only these domains |
+| `exclude_domains` | None | Exclude these domains |
+| `include_text` | False | Include full page text |
+| `include_highlights` | True | Include relevant excerpts |
+| `category` | None | "company", "research paper", "news", etc. |
+
+**When to use exa.search() / web():**
+- Finding external documentation, tutorials, articles
+- Researching topics beyond the local codebase
+- Finding similar pages to a reference URL
 
 ### PageIndex (pi.* - Opt-in, Costs Money)
 

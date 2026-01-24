@@ -12,7 +12,14 @@ import typer
 
 from .config import DEFAULT_CONFIG, load_effective_config, render_effective_config_text
 from .context import WalkOptions, build_context_from_sources
-from .errors import CliError, CliUsageError, IndexError, format_error_json, format_error_text
+from .errors import (
+    CliError,
+    CliUsageError,
+    IndexError,
+    ModelError,
+    format_error_json,
+    format_error_text,
+)
 from .inputs import parse_inputs
 from .output import (
     attach_captured_stdout,
@@ -101,6 +108,38 @@ results = recall(query="authentication flow", limit=20, root="{indexed_root}")
 **When to use which:**
 - Use `rg.search()` / `scan()` for: exact strings, function names, imports, TODOs
 - Use `tv.search()` / `recall()` for: concepts, topics, finding related files
+"""
+
+# System prompt template for Exa web search when enabled
+EXA_TOOL_PROMPT_TEMPLATE = """\
+
+## 3. exa.search() - Web Search (Exa)
+Use for searching the web with neural search. Returns web page results.
+
+```repl
+from rlm_cli.tools_search import exa, web
+
+# Search the web
+results = exa.search(query="Python async best practices", limit=5)
+for r in results:
+    print(f"{{r['title']}}: {{r['url']}}")
+
+# With highlights (relevant text excerpts)
+results = exa.search(
+    query="transformer architecture",
+    limit=5,
+    include_highlights=True
+)
+
+# Or use the alias
+results = web(query="error handling patterns", limit=10)
+```
+
+**When to use exa.search() / web():**
+- External documentation and tutorials
+- Recent news or articles
+- Finding similar pages to a URL
+- Research beyond the local codebase
 """
 
 app = typer.Typer(
@@ -236,6 +275,11 @@ def ask(
         "--no-index",
         help="Skip auto-indexing directories (search tool still available).",
     ),
+    use_exa: bool = typer.Option(
+        False,
+        "--exa",
+        help="Enable Exa web search (requires EXA_API_KEY env var).",
+    ),
     backend_arg: list[str] = typer.Option(
         (),
         "--backend-arg",
@@ -265,6 +309,11 @@ def ask(
         (),
         "--rlm-json",
         help="RLM JSON file (prefix with @).",
+    ),
+    inject_file: str | None = typer.Option(
+        None,
+        "--inject-file",
+        help="Python file to execute between iterations (update variables mid-run).",
     ),
     literal: bool = typer.Option(
         False,
@@ -316,12 +365,14 @@ def ask(
         follow_symlinks,
         markitdown,
         no_index,
+        use_exa,
         backend_arg,
         env_arg,
         rlm_arg,
         backend_json,
         env_json,
         rlm_json,
+        inject_file,
         literal,
         path,
         print_effective_config,
@@ -387,6 +438,11 @@ def complete(
         "--rlm-json",
         help="RLM JSON file (prefix with @).",
     ),
+    inject_file: str | None = typer.Option(
+        None,
+        "--inject-file",
+        help="Python file to execute between iterations (update variables mid-run).",
+    ),
     print_effective_config: bool = typer.Option(
         False,
         "--print-effective-config",
@@ -419,6 +475,7 @@ def complete(
         backend_json,
         env_json,
         rlm_json,
+        inject_file,
         print_effective_config,
     )
 
@@ -454,6 +511,84 @@ def schema(ctx: typer.Context) -> None:
     from .schema import output_schema
 
     emit_text(json.dumps(output_schema(), indent=2, ensure_ascii=True))
+
+
+@app.command(help="List available OpenRouter models.")
+def models(
+    ctx: typer.Context,
+    filter_query: str = typer.Argument(None, help="Filter models by name or ID."),
+    sort_by: str = typer.Option(
+        "id",
+        "--sort",
+        "-s",
+        help="Sort by: id, name, context, or price.",
+    ),
+    show_pricing: bool = typer.Option(
+        False,
+        "--pricing",
+        "-p",
+        help="Show pricing information.",
+    ),
+    refresh: bool = typer.Option(
+        False,
+        "--refresh",
+        "-r",
+        help="Force refresh from API (bypass cache).",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON."),
+) -> None:
+    from .models import fetch_models, format_model_list
+
+    json_mode = _resolve_json_mode(ctx, None, json_output)
+
+    try:
+        model_list = fetch_models(force_refresh=refresh)
+    except RuntimeError as exc:
+        error = ModelError(
+            "Failed to fetch models.",
+            why=str(exc),
+            fix="Check your OPENROUTER_API_KEY and network connection.",
+            try_steps=["export OPENROUTER_API_KEY=sk-or-..."],
+        )
+        _handle_cli_error(error, json_mode, None)
+        return
+
+    if json_mode:
+        # Filter if requested
+        if filter_query:
+            query_lower = filter_query.lower()
+            model_list = [
+                m for m in model_list
+                if query_lower in m.id.lower() or query_lower in m.name.lower()
+            ]
+
+        payload = build_output(
+            ok=True,
+            exit_code=0,
+            result={
+                "count": len(model_list),
+                "models": [
+                    {
+                        "id": m.id,
+                        "name": m.name,
+                        "context_length": m.context_length,
+                        "pricing_prompt": m.pricing_prompt,
+                        "pricing_completion": m.pricing_completion,
+                    }
+                    for m in model_list
+                ],
+            },
+            warnings=[],
+        )
+        emit_json(payload)
+    else:
+        output = format_model_list(
+            model_list,
+            filter_query=filter_query,
+            sort_by=sort_by,
+            show_pricing=show_pricing,
+        )
+        emit_text(output)
 
 
 @app.command(help="Build or update the search index for a directory.")
@@ -657,12 +792,14 @@ def _run_ask(
     follow_symlinks: bool | None,
     markitdown: bool,
     no_index: bool,
+    use_exa: bool,
     backend_arg: Iterable[str],
     env_arg: Iterable[str],
     rlm_arg: Iterable[str],
     backend_json: Iterable[str],
     env_json: Iterable[str],
     rlm_json: Iterable[str],
+    inject_file: str | None,
     literal: bool,
     path: bool,
     print_effective_config: bool,
@@ -758,12 +895,32 @@ def _run_ask(
         # Build custom system prompt with search tool appended if available
         custom_system_prompt = None
         search_setup_code = None
+
+        # Check Exa availability if requested
+        exa_available = False
+        if use_exa:
+            import os
+
+            from .tools_search import EXA_AVAILABLE
+            if EXA_AVAILABLE and os.environ.get("EXA_API_KEY"):
+                exa_available = True
+            else:
+                import sys
+                if not EXA_AVAILABLE:
+                    print("Warning: --exa requested but exa-py not installed. "
+                          "Install with: pip install 'rlm-cli[exa]'", file=sys.stderr)
+                elif not os.environ.get("EXA_API_KEY"):
+                    print("Warning: --exa requested but EXA_API_KEY not set.", file=sys.stderr)
+
         if search_tool_available and indexed_root:
             try:
                 from rlm.utils.prompts import RLM_SYSTEM_PROMPT
                 search_prompt = SEARCH_TOOL_PROMPT_TEMPLATE.format(
                     indexed_root=str(indexed_root)
                 )
+                # Add Exa prompt if enabled
+                if exa_available:
+                    search_prompt += EXA_TOOL_PROMPT_TEMPLATE
                 custom_system_prompt = RLM_SYSTEM_PROMPT + search_prompt
                 # Setup code to pre-load search tools into REPL namespace
                 # configure_root() sets SEARCH_ROOT so rg/tv use project root by default
@@ -772,8 +929,23 @@ from rlm_cli.tools_search import rg, tv, scan, recall, configure_root
 configure_root("{indexed_root}")
 tv.ensure_index(root="{indexed_root}", force=False)
 '''
+                # Add Exa imports if enabled
+                if exa_available:
+                    search_setup_code += '''
+from rlm_cli.tools_search import exa, web
+'''
             except ImportError:
                 pass  # RLM not available, skip search tool prompt
+        elif exa_available:
+            # Exa only (no local search tools)
+            try:
+                from rlm.utils.prompts import RLM_SYSTEM_PROMPT
+                custom_system_prompt = RLM_SYSTEM_PROMPT + EXA_TOOL_PROMPT_TEMPLATE
+                search_setup_code = '''
+from rlm_cli.tools_search import exa, web
+'''
+            except ImportError:
+                pass
 
         context_payload_obj: object = context_payload
         if (dir_mode or "docs") == "files":
@@ -828,6 +1000,9 @@ tv.ensure_index(root="{indexed_root}", force=False)
             if isinstance(output_cfg, dict):
                 resolved_log_dir = output_cfg.get("log_dir")
 
+        # Validate model for OpenRouter backend
+        _validate_openrouter_model(resolved_model, resolved_backend)
+
         start = time.monotonic()
         if json_mode:
             with capture_stdout() as buffer:
@@ -849,12 +1024,17 @@ tv.ensure_index(root="{indexed_root}", force=False)
                     log_dir=resolved_log_dir,
                     verbose=effective_verbose,
                     custom_system_prompt=custom_system_prompt,
+                    inject_file=inject_file,
                 )
             elapsed_ms = int((time.monotonic() - start) * 1000)
+            result_data: dict[str, object] = {"response": result.response}
+            if result.early_exit:
+                result_data["early_exit"] = True
+                result_data["early_exit_reason"] = result.early_exit_reason
             payload = build_output(
                 ok=True,
                 exit_code=0,
-                result={"response": result.response},
+                result=result_data,
                 request=_build_request(
                     question,
                     inputs,
@@ -894,8 +1074,12 @@ tv.ensure_index(root="{indexed_root}", force=False)
                 log_dir=resolved_log_dir,
                 verbose=effective_verbose,
                 custom_system_prompt=custom_system_prompt,
+                inject_file=inject_file,
             )
-            _emit_text_output(result.response, output, context_result.warnings)
+            warnings = list(context_result.warnings)
+            if result.early_exit:
+                warnings.insert(0, "Stopped early (Ctrl+C) - returning best answer so far")
+            _emit_text_output(result.response, output, warnings)
     except CliError as exc:
         _handle_cli_error(exc, json_mode, output)
 
@@ -926,6 +1110,7 @@ def _run_complete(
     backend_json: Iterable[str],
     env_json: Iterable[str],
     rlm_json: Iterable[str],
+    inject_file: str | None,
     print_effective_config: bool,
 ) -> None:
     effective_verbose = verbose or debug
@@ -1008,6 +1193,9 @@ def _run_complete(
             if isinstance(output_cfg, dict):
                 resolved_log_dir = output_cfg.get("log_dir")
 
+        # Validate model for OpenRouter backend
+        _validate_openrouter_model(resolved_model, resolved_backend)
+
         start = time.monotonic()
         if json_mode:
             with capture_stdout() as buffer:
@@ -1030,10 +1218,14 @@ def _run_complete(
                     verbose=effective_verbose,
                 )
             elapsed_ms = int((time.monotonic() - start) * 1000)
+            result_data: dict[str, object] = {"response": result.response}
+            if result.early_exit:
+                result_data["early_exit"] = True
+                result_data["early_exit_reason"] = result.early_exit_reason
             payload = build_output(
                 ok=True,
                 exit_code=0,
-                result={"response": result.response},
+                result=result_data,
                 request=_build_request(
                     text,
                     [],
@@ -1073,7 +1265,10 @@ def _run_complete(
                 log_dir=resolved_log_dir,
                 verbose=effective_verbose,
             )
-            _emit_text_output(result.response, output, [])
+            warnings: list[str] = []
+            if result.early_exit:
+                warnings.append("Stopped early (Ctrl+C) - returning best answer so far")
+            _emit_text_output(result.response, output, warnings)
     except CliError as exc:
         _handle_cli_error(exc, json_mode, output)
 
@@ -1262,3 +1457,40 @@ def _handle_cli_error(error: CliError, json_mode: bool, output: str | None) -> N
     else:
         typer.echo(format_error_text(error), err=True)
     raise typer.Exit(code=error.exit_code)
+
+
+def _validate_openrouter_model(model: str, backend: str) -> None:
+    """Validate model ID for OpenRouter backend.
+
+    Raises ModelError if model is invalid.
+    """
+    if backend != "openrouter" or not model:
+        return
+
+    from .models import validate_model
+
+    result = validate_model(model)
+
+    # If there was an error fetching models, log warning but continue
+    if result.error:
+        import sys
+        print(f"Warning: Could not validate model: {result.error}", file=sys.stderr)
+        return
+
+    if not result.valid:
+        suggestions_text = ""
+        if result.suggestions:
+            suggestions_text = "\n  - ".join([""] + result.suggestions)
+            fix = f"Use a valid model ID. Similar models:{suggestions_text}"
+        else:
+            fix = "Use 'rlm models' to list available models."
+
+        raise ModelError(
+            f"Invalid model: '{model}'",
+            why="Model ID not found in OpenRouter's available models.",
+            fix=fix,
+            try_steps=[
+                "rlm models --refresh",
+                f"rlm models {model.split('/')[0]}",  # Filter by provider
+            ],
+        )

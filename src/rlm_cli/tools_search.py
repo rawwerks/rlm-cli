@@ -84,6 +84,26 @@ def _require_tantivy() -> None:
         )
 
 
+# ---- Exa availability check --------------------------------------------------
+
+try:
+    import exa_py
+
+    EXA_AVAILABLE = True
+except ImportError:
+    exa_py = None  # type: ignore[assignment]
+    EXA_AVAILABLE = False
+
+
+def _require_exa() -> None:
+    """Raise ImportError if exa-py is not installed."""
+    if not EXA_AVAILABLE:
+        raise ImportError(
+            "exa-py is not installed. "
+            "Install with: pip install 'rlm-cli[exa]'"
+        )
+
+
 # ---- Data classes ------------------------------------------------------------
 
 
@@ -135,6 +155,47 @@ class TVHit:
             "language": self.language,
             "bytes_size": self.bytes_size,
         }
+
+
+@dataclass
+class ExaHit:
+    """A single Exa search result (web search).
+
+    Attributes:
+        url: URL of the result
+        title: Title of the page
+        score: Relevance score
+        published_date: Publication date (if available)
+        author: Author (if available)
+        text: Extracted text content (if requested)
+        highlights: Relevant text highlights (if requested)
+    """
+
+    url: str
+    title: str
+    score: Optional[float]
+    published_date: Optional[str]
+    author: Optional[str]
+    text: Optional[str]
+    highlights: Optional[List[str]]
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        result: Dict[str, Any] = {
+            "url": self.url,
+            "title": self.title,
+        }
+        if self.score is not None:
+            result["score"] = self.score
+        if self.published_date:
+            result["published_date"] = self.published_date
+        if self.author:
+            result["author"] = self.author
+        if self.text:
+            result["text"] = self.text
+        if self.highlights:
+            result["highlights"] = self.highlights
+        return result
 
 
 # ---- Ripgrep wrapper ---------------------------------------------------------
@@ -407,6 +468,207 @@ class tv:
         }
 
 
+# ---- Exa wrapper -------------------------------------------------------------
+
+# Global Exa client cache
+_exa_client: Any = None
+
+
+def _get_exa_client() -> Any:
+    """Get or create an Exa client."""
+    global _exa_client
+    import os
+
+    if _exa_client is None:
+        _require_exa()
+        api_key = os.environ.get("EXA_API_KEY")
+        if not api_key:
+            raise ValueError(
+                "EXA_API_KEY environment variable is not set. "
+                "Get your API key from https://exa.ai and set it in your environment."
+            )
+        _exa_client = exa_py.Exa(api_key)  # type: ignore[union-attr]
+
+    return _exa_client
+
+
+class exa:
+    """
+    exa.* = Exa web search (external API).
+
+    Use for searching the web with neural/keyword search.
+    Returns web page results (url, title, text, highlights).
+
+    This is EXTERNAL WEB SEARCH - requires EXA_API_KEY environment variable.
+    Use when you need to find information beyond the local codebase.
+
+    Example:
+        results = exa.search(query="Python async best practices", limit=5)
+        for r in results:
+            print(f"{r['title']}: {r['url']}")
+    """
+
+    @staticmethod
+    def search(
+        *,
+        query: str,
+        limit: int = 10,
+        search_type: str = "auto",
+        include_domains: Optional[Sequence[str]] = None,
+        exclude_domains: Optional[Sequence[str]] = None,
+        start_published_date: Optional[str] = None,
+        end_published_date: Optional[str] = None,
+        include_text: bool = False,
+        include_highlights: bool = True,
+        category: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Search the web using Exa. Returns ranked web results.
+
+        Args:
+            query: Search query string.
+            limit: Maximum number of results. Default 10.
+            search_type: Search type - "auto", "neural", or "keyword". Default "auto".
+            include_domains: Only include results from these domains.
+            exclude_domains: Exclude results from these domains.
+            start_published_date: Filter results published after this date (YYYY-MM-DD).
+            end_published_date: Filter results published before this date (YYYY-MM-DD).
+            include_text: Include full page text in results. Default False.
+            include_highlights: Include relevant text highlights. Default True.
+            category: Filter by category (e.g., "company", "research paper", "news").
+
+        Returns:
+            List of dicts with keys: url, title, score, published_date, author,
+            text (if include_text=True), highlights (if include_highlights=True)
+
+        Example:
+            # Find recent articles about a topic
+            results = exa.search(
+                query="transformer architecture explained",
+                limit=5,
+                include_highlights=True
+            )
+
+            # Search specific domains
+            results = exa.search(
+                query="Python typing",
+                include_domains=["docs.python.org", "realpython.com"],
+                limit=10
+            )
+        """
+        _require_exa()
+        client = _get_exa_client()
+
+        # Build search kwargs
+        kwargs: Dict[str, Any] = {
+            "query": query,
+            "num_results": limit,
+            "type": search_type,
+        }
+
+        if include_domains:
+            kwargs["include_domains"] = list(include_domains)
+        if exclude_domains:
+            kwargs["exclude_domains"] = list(exclude_domains)
+        if start_published_date:
+            kwargs["start_published_date"] = start_published_date
+        if end_published_date:
+            kwargs["end_published_date"] = end_published_date
+        if category:
+            kwargs["category"] = category
+
+        # Use search_and_contents if we need text or highlights
+        if include_text or include_highlights:
+            kwargs["text"] = include_text
+            kwargs["highlights"] = include_highlights
+            response = client.search_and_contents(**kwargs)
+        else:
+            response = client.search(**kwargs)
+
+        # Parse results into structured hits
+        hits: List[Dict[str, Any]] = []
+        for result in response.results:
+            hit = ExaHit(
+                url=result.url,
+                title=result.title or "",
+                score=getattr(result, "score", None),
+                published_date=getattr(result, "published_date", None),
+                author=getattr(result, "author", None),
+                text=getattr(result, "text", None) if include_text else None,
+                highlights=getattr(result, "highlights", None) if include_highlights else None,
+            )
+            hits.append(hit.to_dict())
+
+        return hits
+
+    @staticmethod
+    def find_similar(
+        *,
+        url: str,
+        limit: int = 10,
+        exclude_source_domain: bool = True,
+        include_text: bool = False,
+        include_highlights: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """Find web pages similar to a given URL.
+
+        Args:
+            url: URL to find similar pages for.
+            limit: Maximum number of results. Default 10.
+            exclude_source_domain: Exclude results from the same domain. Default True.
+            include_text: Include full page text in results. Default False.
+            include_highlights: Include relevant text highlights. Default True.
+
+        Returns:
+            List of dicts with keys: url, title, score, published_date, author,
+            text (if include_text=True), highlights (if include_highlights=True)
+
+        Example:
+            # Find similar articles
+            results = exa.find_similar(
+                url="https://example.com/article",
+                limit=5
+            )
+        """
+        _require_exa()
+        client = _get_exa_client()
+
+        kwargs: Dict[str, Any] = {
+            "url": url,
+            "num_results": limit,
+            "exclude_source_domain": exclude_source_domain,
+        }
+
+        if include_text or include_highlights:
+            kwargs["text"] = include_text
+            kwargs["highlights"] = include_highlights
+            response = client.find_similar_and_contents(**kwargs)
+        else:
+            response = client.find_similar(**kwargs)
+
+        hits: List[Dict[str, Any]] = []
+        for result in response.results:
+            hit = ExaHit(
+                url=result.url,
+                title=result.title or "",
+                score=getattr(result, "score", None),
+                published_date=getattr(result, "published_date", None),
+                author=getattr(result, "author", None),
+                text=getattr(result, "text", None) if include_text else None,
+                highlights=getattr(result, "highlights", None) if include_highlights else None,
+            )
+            hits.append(hit.to_dict())
+
+        return hits
+
+    @staticmethod
+    def available() -> bool:
+        """Check if Exa is available (package installed and API key set)."""
+        if not EXA_AVAILABLE:
+            return False
+        import os
+        return bool(os.environ.get("EXA_API_KEY"))
+
+
 # ---- Semantic aliases --------------------------------------------------------
 
 # These provide planner-friendly names for the two search modes:
@@ -457,17 +719,43 @@ def recall(
     return tv.search(query=query, limit=limit, root=root, language=language)
 
 
+def web(
+    *,
+    query: str,
+    limit: int = 10,
+    include_text: bool = False,
+    include_highlights: bool = True,
+) -> List[Dict[str, Any]]:
+    """Alias for exa.search() - search the web for information.
+
+    Use this for finding external information, documentation,
+    articles, and web resources.
+
+    See exa.search() for full documentation.
+    """
+    return exa.search(
+        query=query,
+        limit=limit,
+        include_text=include_text,
+        include_highlights=include_highlights,
+    )
+
+
 # ---- Exports -----------------------------------------------------------------
 
 __all__ = [
     "rg",
     "tv",
+    "exa",
     "scan",
     "recall",
+    "web",
     "configure_root",
     "SEARCH_ROOT",
     "RGHit",
     "TVHit",
+    "ExaHit",
     "RIPGREP_AVAILABLE",
     "TANTIVY_AVAILABLE",
+    "EXA_AVAILABLE",
 ]
