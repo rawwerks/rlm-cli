@@ -20,6 +20,8 @@ _FLOAT_RE = re.compile(r"^[+-]?\d+\.\d+([eE][+-]?\d+)?$")
 class RlmResult:
     response: str
     raw: object
+    early_exit: bool = False
+    early_exit_reason: str | None = None
 
 
 def run_completion(
@@ -41,6 +43,7 @@ def run_completion(
     log_dir: str | None = None,
     verbose: bool = False,
     custom_system_prompt: str | None = None,
+    inject_file: str | None = None,
 ) -> RlmResult:
     try:
         from rlm import RLM

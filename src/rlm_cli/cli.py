@@ -23,6 +23,8 @@ from .errors import (
 from .inputs import parse_inputs
 from .output import (
     attach_captured_stdout,
+    build_execution_summary,
+    build_execution_tree,
     build_output,
     capture_stdout,
     emit_json,
@@ -212,7 +214,7 @@ def ask(
     output_format: str | None = typer.Option(
         None,
         "--output-format",
-        help="Output format: text or json.",
+        help="Output format: text, json, or json-tree.",
     ),
     json_output: bool = typer.Option(
         False,
@@ -330,6 +332,21 @@ def ask(
         "--print-effective-config",
         help="Print merged config for debugging.",
     ),
+    show_tree: bool = typer.Option(
+        False,
+        "--tree",
+        help="Show execution tree visualization (requires --verbose).",
+    ),
+    show_summary: bool = typer.Option(
+        False,
+        "--summary",
+        help="Show execution summary with depth statistics.",
+    ),
+    depth_tags: bool = typer.Option(
+        False,
+        "--depth-tags",
+        help="Prefix log output with depth tags [N] for filtering.",
+    ),
 ) -> None:
     _run_ask(
         ctx,
@@ -376,6 +393,9 @@ def ask(
         literal,
         path,
         print_effective_config,
+        show_tree,
+        show_summary,
+        depth_tags,
     )
 
 
@@ -399,7 +419,7 @@ def complete(
     output_format: str | None = typer.Option(
         None,
         "--output-format",
-        help="Output format: text or json.",
+        help="Output format: text, json, or json-tree.",
     ),
     json_output: bool = typer.Option(
         False,
@@ -803,6 +823,9 @@ def _run_ask(
     literal: bool,
     path: bool,
     print_effective_config: bool,
+    show_tree: bool = False,
+    show_summary: bool = False,
+    depth_tags: bool = False,
 ) -> None:
     effective_verbose = verbose or debug
     if effective_verbose and quiet:
@@ -1031,6 +1054,20 @@ from rlm_cli.tools_search import exa, web
             if result.early_exit:
                 result_data["early_exit"] = True
                 result_data["early_exit_reason"] = result.early_exit_reason
+
+            # Add execution tree for json-tree format
+            if output_format_final == "json-tree":
+                tree = build_execution_tree(result.raw)
+                if tree:
+                    result_data["tree"] = tree
+
+            # Build stats with optional summary
+            stats = _build_stats(context_result, elapsed_ms)
+            if show_summary:
+                summary = build_execution_summary(result.raw)
+                if summary:
+                    stats["summary"] = summary
+
             payload = build_output(
                 ok=True,
                 exit_code=0,
@@ -1047,7 +1084,7 @@ from rlm_cli.tools_search import exa, web
                     effective_verbose,
                 ),
                 artifacts=_build_artifacts(resolved_log_dir),
-                stats=_build_stats(context_result, elapsed_ms),
+                stats=stats,
                 warnings=context_result.warnings,
                 debug={"effective_config": effective_config_debug}
                 if effective_config_debug is not None
@@ -1080,6 +1117,12 @@ from rlm_cli.tools_search import exa, web
             if result.early_exit:
                 warnings.insert(0, "Stopped early (Ctrl+C) - returning best answer so far")
             _emit_text_output(result.response, output, warnings)
+
+            # Print summary to stderr if requested
+            if show_summary:
+                summary = build_execution_summary(result.raw)
+                if summary:
+                    _emit_execution_summary(summary)
     except CliError as exc:
         _handle_cli_error(exc, json_mode, output)
 
@@ -1285,7 +1328,7 @@ def _resolve_json_mode(
         return True
     if output_format is None:
         return False
-    return output_format.lower() == "json"
+    return output_format.lower() in ("json", "json-tree")
 
 
 def _resolve_output_format(
@@ -1443,6 +1486,43 @@ def _emit_text_output(result_text: str, output: str | None, warnings: list[str])
             typer.echo(f"Warning: {warning}", err=True)
         return
     emit_text(result_text, warnings=warnings)
+
+
+def _emit_execution_summary(summary: dict[str, object]) -> None:
+    """Emit execution summary to stderr in a human-readable format."""
+    import sys
+
+    total_depth = summary.get("total_depth", 0)
+    total_nodes = summary.get("total_nodes", 0)
+    total_cost = summary.get("total_cost")
+    total_duration = summary.get("total_duration", 0)
+    by_depth = summary.get("by_depth", {})
+
+    sys.stderr.write("\n=== RLM Execution Summary ===\n")
+
+    # Main stats line
+    main_stats = f"Total depth: {total_depth} | Nodes: {total_nodes}"
+    if total_cost is not None:
+        main_stats += f" | Cost: ${total_cost:.4f}"
+    main_stats += f" | Duration: {total_duration:.2f}s\n"
+    sys.stderr.write(main_stats)
+
+    # Per-depth breakdown
+    if by_depth and isinstance(by_depth, dict):
+        sys.stderr.write("\n")
+        for depth_str, stats in sorted(by_depth.items(), key=lambda x: int(x[0])):
+            if isinstance(stats, dict):
+                calls = stats.get("calls", 0)
+                cost = stats.get("cost")
+                duration = stats.get("duration", 0)
+                line = f"Depth {depth_str}: {calls} call(s)"
+                if cost is not None:
+                    line += f" (${cost:.4f}, {duration:.2f}s)"
+                else:
+                    line += f" ({duration:.2f}s)"
+                sys.stderr.write(line + "\n")
+
+    sys.stderr.write("\n")
 
 
 def _handle_cli_error(error: CliError, json_mode: bool, output: str | None) -> None:
