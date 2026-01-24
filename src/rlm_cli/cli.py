@@ -860,7 +860,7 @@ def _run_ask(
             output_format,
             effective,
         )
-        json_mode = output_format_final == "json"
+        json_mode = output_format_final in ("json", "json-tree")
 
         effective_config_debug: dict[str, object] | None = None
         if print_effective_config:
@@ -1184,7 +1184,7 @@ def _run_complete(
             output_format,
             effective,
         )
-        json_mode = output_format_final == "json"
+        json_mode = output_format_final in ("json", "json-tree")
 
         effective_config_debug: dict[str, object] | None = None
         if print_effective_config:
@@ -1336,10 +1336,11 @@ def _resolve_output_format(
     output_format: str | None,
     effective: Any,
 ) -> str:
-    if json_flag:
-        return "json"
+    # Preserve explicit output_format (like "json-tree") even when json_flag is True
     if output_format:
         return output_format
+    if json_flag:
+        return "json"
     output_cfg = effective.data.get("output")
     if isinstance(output_cfg, dict):
         return str(output_cfg.get("format") or "text")

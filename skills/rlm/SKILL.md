@@ -46,6 +46,8 @@ rlm ask <inputs> -q "question"
 | `--backend` | Provider: `openrouter` (default), `openai`, `anthropic` |
 | `--model NAME` | Model override (format: `provider/model` or just `model`) |
 | `--json` | Machine-readable output |
+| `--output-format` | Output format: `text`, `json`, or `json-tree` |
+| `--summary` | Show execution summary with depth statistics |
 | `--extensions .py .ts` | Filter by extension |
 | `--include/--exclude` | Glob patterns |
 | `--max-iterations N` | Limit REPL iterations (default: 30) |
@@ -60,6 +62,36 @@ rlm ask <inputs> -q "question"
 **JSON output structure:**
 ```json
 {"ok": true, "exit_code": 0, "result": {"response": "..."}, "stats": {...}}
+```
+
+**JSON-tree output (`--output-format=json-tree`):**
+Adds execution tree showing nested RLM calls:
+```json
+{
+  "result": {
+    "response": "...",
+    "tree": {
+      "depth": 0,
+      "model": "openai/gpt-4",
+      "duration": 2.3,
+      "cost": 0.05,
+      "iterations": [...],
+      "children": [...]
+    }
+  }
+}
+```
+
+**Summary output (`--summary`):**
+Shows depth-wise statistics after completion:
+- JSON mode: adds `summary` field to `stats`
+- Text mode: prints summary to stderr
+
+```
+=== RLM Execution Summary ===
+Total depth: 2 | Nodes: 3 | Cost: $0.0054 | Duration: 17.38s
+Depth 0: 1 call(s) ($0.0047, 13.94s)
+Depth 1: 2 call(s) ($0.0007, 3.44s)
 ```
 
 ### complete - Query without context
