@@ -48,7 +48,12 @@ rlm ask <inputs> -q "question"
 | `--json` | Machine-readable output |
 | `--extensions .py .ts` | Filter by extension |
 | `--include/--exclude` | Glob patterns |
-| `--max-iterations N` | Limit recursive calls (default: 30) |
+| `--max-iterations N` | Limit REPL iterations (default: 30) |
+| `--max-depth N` | Recursive RLM depth (default: 1 = no recursion) |
+| `--max-budget N.NN` | Spending limit in USD (requires OpenRouter) |
+| `--max-timeout N` | Time limit in seconds |
+| `--max-tokens N` | Total token limit (input + output) |
+| `--max-errors N` | Consecutive error limit before stopping |
 | `--no-index` | Skip auto-indexing |
 
 **JSON output structure:**
@@ -136,6 +141,67 @@ max_iterations: 30
 - `RLM_CONFIG` - Config file path
 - `RLM_JSON=1` - Always output JSON
 
+## Recursion and Budget Limits
+
+### Recursive RLM (`--max-depth`)
+
+Enable recursive `llm_query()` calls where child RLMs process sub-tasks:
+
+```bash
+# 2 levels of recursion
+rlm ask . -q "Research thoroughly" --max-depth 2
+
+# With budget cap
+rlm ask . -q "Analyze codebase" --max-depth 3 --max-budget 0.50
+```
+
+### Budget Control (`--max-budget`)
+
+Limit spending per completion. Raises `BudgetExceededError` when exceeded:
+
+```bash
+# Cap at $1.00
+rlm complete "Complex task" --max-budget 1.00
+
+# Very low budget (will likely exceed)
+rlm ask . -q "Analyze everything" --max-budget 0.001
+```
+
+**Requirements:** OpenRouter backend (returns cost data in responses).
+
+### Other Limits
+
+**Timeout (`--max-timeout`)** - Stop after N seconds:
+```bash
+rlm complete "Complex task" --max-timeout 30
+```
+
+**Token limit (`--max-tokens`)** - Stop after N total tokens:
+```bash
+rlm ask . -q "Analyze" --max-tokens 10000
+```
+
+**Error threshold (`--max-errors`)** - Stop after N consecutive code errors:
+```bash
+rlm complete "Write code" --max-errors 3
+```
+
+### Stop Conditions
+
+RLM execution stops when any of these occur:
+1. **Final answer** - LLM calls `FINAL_VAR()` with result
+2. **Max iterations** - Exceeds `--max-iterations` (exit code 0, graceful - forces final answer)
+3. **Max budget exceeded** - Spending > `--max-budget` (exit code 20, error)
+4. **Max timeout exceeded** - Time > `--max-timeout` (exit code 20, error with partial answer)
+5. **Max tokens exceeded** - Tokens > `--max-tokens` (exit code 20, error with partial answer)
+6. **Max errors exceeded** - Consecutive errors > `--max-errors` (exit code 20, error with partial answer)
+7. **User cancellation** - Ctrl+C (exit code 20, error with partial answer if available)
+8. **Max depth reached** - Child RLM at depth 0 cannot recurse further
+
+**Note on max iterations:** This is a soft limit. When exceeded, RLM prompts the LLM one more time to provide a final answer. Modern LLMs typically complete in 1-2 iterations.
+
+**Partial answers:** When timeout, tokens, errors, or cancellation stops execution, the error includes `partial_answer` if any response was generated before stopping.
+
 ## Exit Codes
 
 | Code | Meaning |
@@ -144,7 +210,7 @@ max_iterations: 30
 | 2 | CLI usage error |
 | 10 | Input error (file not found) |
 | 11 | Config error (missing API key) |
-| 20 | Backend/API error |
+| 20 | Backend/API error (includes budget exceeded) |
 | 30 | Runtime error |
 | 40 | Index/search error |
 

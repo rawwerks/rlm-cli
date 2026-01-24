@@ -30,6 +30,10 @@ def run_completion(
     environment: str,
     max_iterations: int,
     max_depth: int,
+    max_budget: float | None = None,
+    max_timeout: float | None = None,
+    max_tokens: int | None = None,
+    max_errors: int | None = None,
     backend_kwargs: Mapping[str, object] | None = None,
     environment_kwargs: Mapping[str, object] | None = None,
     rlm_kwargs: Mapping[str, object] | None = None,
@@ -63,6 +67,14 @@ def run_completion(
         "backend_kwargs": backend_payload,
         "environment_kwargs": dict(environment_kwargs or {}),
     }
+    if max_budget is not None:
+        rlm_init_kwargs["max_budget"] = max_budget
+    if max_timeout is not None:
+        rlm_init_kwargs["max_timeout"] = max_timeout
+    if max_tokens is not None:
+        rlm_init_kwargs["max_tokens"] = max_tokens
+    if max_errors is not None:
+        rlm_init_kwargs["max_errors"] = max_errors
     if logger is not None:
         rlm_init_kwargs["logger"] = logger
     if verbose and (not rlm_kwargs or "verbose" not in rlm_kwargs):
@@ -89,6 +101,94 @@ def run_completion(
             root_prompt=question,
         )
     except Exception as exc:  # noqa: BLE001
+        exc_name = type(exc).__name__
+        partial = getattr(exc, "partial_answer", None)
+
+        # Budget exceeded
+        if exc_name == "BudgetExceededError":
+            spent = getattr(exc, "spent", None)
+            budget = getattr(exc, "budget", None)
+            if spent is not None and budget is not None:
+                why = f"Budget exceeded: spent ${spent:.6f} of ${budget:.6f} budget"
+            else:
+                why = str(exc)
+            suggested_budget = max((budget or 0.01) * 10, 0.10)
+            raise BackendError(
+                "RLM completion failed.",
+                why=why,
+                fix="Increase --max-budget or reduce task complexity.",
+                try_steps=[f"rlm complete '...' --max-budget {suggested_budget:.2f}"],
+            ) from exc
+
+        # Timeout exceeded
+        if exc_name == "TimeoutExceededError":
+            elapsed = getattr(exc, "elapsed", None)
+            timeout = getattr(exc, "timeout", None)
+            if elapsed is not None and timeout is not None:
+                why = f"Timeout exceeded: {elapsed:.1f}s of {timeout:.1f}s limit"
+            else:
+                why = str(exc)
+            if partial:
+                why += f" (partial answer available: {len(partial)} chars)"
+            suggested_timeout = max((timeout or 30) * 2, 60)
+            raise BackendError(
+                "RLM completion failed.",
+                why=why,
+                fix="Increase --max-timeout or simplify the task.",
+                try_steps=[f"rlm complete '...' --max-timeout {suggested_timeout:.0f}"],
+            ) from exc
+
+        # Token limit exceeded
+        if exc_name == "TokenLimitExceededError":
+            tokens_used = getattr(exc, "tokens_used", None)
+            token_limit = getattr(exc, "token_limit", None)
+            if tokens_used is not None and token_limit is not None:
+                why = f"Token limit exceeded: {tokens_used:,} of {token_limit:,} tokens"
+            else:
+                why = str(exc)
+            if partial:
+                why += f" (partial answer available: {len(partial)} chars)"
+            suggested_tokens = max((token_limit or 10000) * 2, 20000)
+            raise BackendError(
+                "RLM completion failed.",
+                why=why,
+                fix="Increase --max-tokens or reduce context size.",
+                try_steps=[f"rlm complete '...' --max-tokens {suggested_tokens}"],
+            ) from exc
+
+        # Error threshold exceeded
+        if exc_name == "ErrorThresholdExceededError":
+            error_count = getattr(exc, "error_count", None)
+            threshold = getattr(exc, "threshold", None)
+            last_error = getattr(exc, "last_error", None)
+            if error_count is not None and threshold is not None:
+                why = f"Error threshold exceeded: {error_count} consecutive errors (limit: {threshold})"
+            else:
+                why = str(exc)
+            if last_error:
+                why += f"\nLast error: {last_error[:200]}"
+            if partial:
+                why += f" (partial answer available: {len(partial)} chars)"
+            raise BackendError(
+                "RLM completion failed.",
+                why=why,
+                fix="Increase --max-errors or fix code causing errors.",
+                try_steps=["rlm doctor --json"],
+            ) from exc
+
+        # User cancellation
+        if exc_name == "CancellationError":
+            why = "Execution cancelled by user (Ctrl+C)"
+            if partial:
+                why += f" (partial answer available: {len(partial)} chars)"
+            raise BackendError(
+                "RLM completion cancelled.",
+                why=why,
+                fix="Re-run the command to continue.",
+                try_steps=[],
+            ) from exc
+
+        # Generic error
         raise BackendError(
             "RLM completion failed.",
             why=str(exc),

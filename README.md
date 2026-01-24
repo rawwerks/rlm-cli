@@ -111,11 +111,49 @@ rlm complete "Say hello" --backend openrouter --model z-ai/glm-4.7:turbo --json
 - `--json` outputs JSON only on stdout.
 - `--output-format text|json` sets output format.
 - `--backend`, `--model`, `--environment` control the RLM backend.
+- `--max-iterations N` sets max REPL iterations (default: 30).
+- `--max-depth N` enables recursive RLM calls (default: 1, no recursion).
+- `--max-budget N.NN` limits spending in USD (requires cost-tracking backend like OpenRouter).
 - `--backend-arg/--env-arg/--rlm-arg KEY=VALUE` pass extra kwargs.
 - `--backend-json/--env-json/--rlm-json @file.json` merge JSON kwargs.
 - `--literal` treats inputs as literal text; `--path` forces filesystem paths.
 - `--markitdown/--no-markitdown` toggles URL and non-text conversion to Markdown.
 - `--verbose` or `--debug` enables verbose backend logging.
+
+## Recursion and Budget Limits
+
+### Recursive RLM Calls (`--max-depth`)
+
+RLM can recursively call itself to handle complex tasks. When `--max-depth` > 1, the LLM's `llm_query()` function creates child RLM instances with `max_depth - 1`.
+
+```bash
+# Enable 2 levels of recursive calls
+rlm ask . -q "Research this codebase thoroughly" --max-depth 2
+```
+
+### Budget Control (`--max-budget`)
+
+Limit spending per completion with `--max-budget`. When the budget is exceeded, a `BudgetExceededError` is raised with details of spent vs budget.
+
+```bash
+# Cap spending at $1.00
+rlm ask . -q "Analyze this complex codebase" --max-budget 1.00
+```
+
+**Requirements:**
+- Cost tracking requires a backend that returns cost data (e.g., OpenRouter)
+- Budget is propagated to child RLMs (remaining budget)
+- Works with `--max-depth` for recursive cost control
+
+### Stop Conditions
+
+The RLM execution can stop for any of these reasons:
+1. **Final answer found** - LLM calls `FINAL_VAR()` with result
+2. **Max iterations reached** - Exceeds `--max-iterations` (graceful, forces final answer)
+3. **Max budget exceeded** - Spending exceeds `--max-budget` (exit code 20, error with details)
+4. **Max depth reached** - Child RLM at depth 0 cannot recurse further
+
+**Note:** Max iterations is a soft limit. When exceeded, RLM prompts the LLM to provide a final answer. Modern LLMs typically complete in 1-2 iterations.
 
 ## Search Tools
 
