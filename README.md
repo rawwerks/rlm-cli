@@ -35,17 +35,40 @@ Once installed, Claude can use rlm to analyze code, review diffs, and explore co
 
 ## Install
 
-### pip/uv
+### One-liner (recommended)
 
 ```bash
-uv venv
-uv pip install -e .
+curl -sSL https://raw.githubusercontent.com/rawwerks/rlm-cli/master/install.sh | bash
 ```
 
-### uvx (no checkout)
+This clones the repo to `~/.local/share/rlm-cli` and symlinks `rlm` to `~/.local/bin/`.
+
+To uninstall:
+```bash
+curl -sSL https://raw.githubusercontent.com/rawwerks/rlm-cli/master/uninstall.sh | bash
+```
+
+### uvx (no install)
+
+Run directly without installing:
 
 ```bash
 uvx --from git+https://github.com/rawwerks/rlm-cli.git rlm --help
+```
+
+### pipx
+
+```bash
+pipx install git+https://github.com/rawwerks/rlm-cli.git
+```
+
+### Development install
+
+```bash
+git clone --recurse-submodules https://github.com/rawwerks/rlm-cli.git
+cd rlm-cli
+uv venv
+uv pip install -e .
 ```
 
 ## Authentication
