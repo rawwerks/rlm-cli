@@ -376,6 +376,16 @@ Adjust with:
 Config files (YAML): `./rlm.yaml`, `./.rlm.yaml`, `~/.config/rlm/config.yaml`.
 Precedence: CLI flags > env vars > config > defaults.
 
+```bash
+rlm config                              # Show effective config (merged from all sources)
+rlm config get <key>                    # Get a specific value (supports dot notation)
+rlm config set <key> <value>            # Set a value in user config
+rlm config set <key> <value> --local    # Set a value in project config (./rlm.yaml)
+rlm config path                         # Show which config file is being used
+rlm config init                         # Create ~/.config/rlm/config.yaml with defaults
+rlm config init --local                 # Create ./rlm.yaml with defaults
+```
+
 ## Exit codes
 
 - `0` success

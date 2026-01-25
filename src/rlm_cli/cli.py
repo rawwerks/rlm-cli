@@ -163,6 +163,183 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
+# Config subcommand group
+config_app = typer.Typer(
+    help="Manage configuration.",
+    no_args_is_help=False,
+    invoke_without_command=True,
+)
+app.add_typer(config_app, name="config")
+
+
+@config_app.callback(invoke_without_command=True)
+def config_main(
+    ctx: typer.Context,
+    json_output: bool = typer.Option(False, "--json", help="Output JSON."),
+) -> None:
+    """Show effective configuration (merged from all sources)."""
+    if ctx.invoked_subcommand is not None:
+        # A subcommand was invoked, let it handle things
+        ctx.obj = ctx.obj or {}
+        ctx.obj["config_json"] = json_output
+        return
+
+    # No subcommand - show effective config
+    effective = load_effective_config(defaults=DEFAULT_CONFIG)
+    json_mode = json_output or (ctx.obj and ctx.obj.get("json"))
+
+    if json_mode:
+        payload = {
+            "ok": True,
+            "config": effective.data,
+            "source": str(effective.config_path) if effective.config_path else None,
+        }
+        emit_json(payload)
+    else:
+        output_lines = [render_effective_config_text(effective.data).rstrip()]
+        if effective.config_path:
+            output_lines.append(f"\n(from: {effective.config_path})")
+        else:
+            output_lines.append("\n(using defaults, no config file found)")
+        emit_text("".join(output_lines))
+
+
+@config_app.command("get")
+def config_get(
+    ctx: typer.Context,
+    key: str = typer.Argument(..., help="Config key (supports dot notation, e.g., backend_kwargs.temperature)."),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON."),
+) -> None:
+    """Get a specific configuration value."""
+    effective = load_effective_config(defaults=DEFAULT_CONFIG)
+    value = get_nested_value(effective.data, key)
+
+    parent_json = ctx.obj.get("config_json") if ctx.obj else False
+    json_mode = json_output or parent_json or (ctx.obj and ctx.obj.get("json"))
+
+    if json_mode:
+        emit_json({"ok": True, "key": key, "value": value})
+    else:
+        if value is None:
+            typer.echo(f"(not set)")
+        elif isinstance(value, dict):
+            typer.echo(render_effective_config_text(value).rstrip())
+        elif isinstance(value, bool):
+            typer.echo("true" if value else "false")
+        else:
+            typer.echo(str(value))
+
+
+@config_app.command("set")
+def config_set(
+    ctx: typer.Context,
+    key: str = typer.Argument(..., help="Config key (supports dot notation)."),
+    value: str = typer.Argument(..., help="Value to set."),
+    local: bool = typer.Option(False, "--local", help="Write to ./rlm.yaml instead of ~/.config/rlm/config.yaml."),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON."),
+) -> None:
+    """Set a configuration value in the config file."""
+    config_path = get_local_config_path() if local else get_user_config_path()
+    config_data = load_or_create_config(config_path)
+    coerced_value = coerce_value(value)
+    set_nested_value(config_data, key, coerced_value)
+    write_config_file(config_path, config_data)
+
+    parent_json = ctx.obj.get("config_json") if ctx.obj else False
+    json_mode = json_output or parent_json or (ctx.obj and ctx.obj.get("json"))
+
+    if json_mode:
+        emit_json({
+            "ok": True,
+            "key": key,
+            "value": coerced_value,
+            "path": str(config_path),
+        })
+    else:
+        typer.echo(f"Set {key} = {coerced_value!r} in {config_path}")
+
+
+@config_app.command("path")
+def config_path(
+    ctx: typer.Context,
+    json_output: bool = typer.Option(False, "--json", help="Output JSON."),
+) -> None:
+    """Show which config file is being used."""
+    from .config import resolve_config_path
+
+    config_path = resolve_config_path()
+    user_path = get_user_config_path()
+    local_path = get_local_config_path()
+
+    parent_json = ctx.obj.get("config_json") if ctx.obj else False
+    json_mode = json_output or parent_json or (ctx.obj and ctx.obj.get("json"))
+
+    if json_mode:
+        emit_json({
+            "ok": True,
+            "active": str(config_path) if config_path else None,
+            "exists": config_path.exists() if config_path else False,
+            "paths": {
+                "user": str(user_path),
+                "user_exists": user_path.exists(),
+                "local": str(local_path),
+                "local_exists": local_path.exists(),
+            },
+        })
+    else:
+        if config_path:
+            status = "exists" if config_path.exists() else "does not exist"
+            typer.echo(f"{config_path} ({status})")
+        else:
+            typer.echo("No config file found")
+            typer.echo(f"  User config:  {user_path} (does not exist)")
+            typer.echo(f"  Local config: {local_path} (does not exist)")
+
+
+@config_app.command("init")
+def config_init(
+    ctx: typer.Context,
+    local: bool = typer.Option(False, "--local", help="Create ./rlm.yaml instead of ~/.config/rlm/config.yaml."),
+    force: bool = typer.Option(False, "--force", help="Overwrite existing config file."),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON."),
+) -> None:
+    """Create a config file with defaults."""
+    config_path = get_local_config_path() if local else get_user_config_path()
+
+    parent_json = ctx.obj.get("config_json") if ctx.obj else False
+    json_mode = json_output or parent_json or (ctx.obj and ctx.obj.get("json"))
+
+    if config_path.exists() and not force:
+        if json_mode:
+            emit_json({
+                "ok": False,
+                "error": "Config file already exists",
+                "path": str(config_path),
+            })
+        else:
+            typer.echo(f"Config file already exists: {config_path}")
+            typer.echo("Use --force to overwrite.")
+        raise typer.Exit(code=1)
+
+    # Write default config (without internal defaults like search settings)
+    minimal_defaults = {
+        "backend": "openai",
+        "model": "",
+        "environment": "local",
+        "max_iterations": 30,
+        "max_depth": 1,
+    }
+    write_config_file(config_path, minimal_defaults)
+
+    if json_mode:
+        emit_json({
+            "ok": True,
+            "path": str(config_path),
+            "created": True,
+        })
+    else:
+        typer.echo(f"Created {config_path}")
+
 
 def _version_text() -> str:
     try:

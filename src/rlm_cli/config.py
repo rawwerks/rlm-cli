@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+import json
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, cast
+from typing import Any, Mapping, cast
 
 import yaml
 
 from .errors import ConfigError
+
+# Value coercion patterns
+_INT_RE = re.compile(r"^[+-]?\d+$")
+_FLOAT_RE = re.compile(r"^[+-]?\d+\.\d+([eE][+-]?\d+)?$")
 
 ENV_CONFIG_PATH = "RLM_CONFIG"
 ENV_OUTPUT_FORMAT = "RLM_OUTPUT"
@@ -187,3 +193,99 @@ def _deep_merge(
         else:
             result[key] = value
     return result
+
+
+def get_user_config_path() -> Path:
+    """Return the user-level config path (~/.config/rlm/config.yaml)."""
+    return Path.home() / ".config" / "rlm" / "config.yaml"
+
+
+def get_local_config_path() -> Path:
+    """Return the local/project-level config path (./rlm.yaml)."""
+    return Path.cwd() / "rlm.yaml"
+
+
+def get_nested_value(data: dict[str, Any], key: str) -> Any:
+    """Get a value from nested dict using dot notation.
+
+    Args:
+        data: The dictionary to search
+        key: Dot-separated key path (e.g., "backend_kwargs.temperature")
+
+    Returns:
+        The value at the key path, or None if not found
+    """
+    parts = key.split(".")
+    current: Any = data
+    for part in parts:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(part)
+        if current is None:
+            return None
+    return current
+
+
+def set_nested_value(data: dict[str, Any], key: str, value: Any) -> None:
+    """Set a value in nested dict using dot notation.
+
+    Args:
+        data: The dictionary to modify (in-place)
+        key: Dot-separated key path (e.g., "backend_kwargs.temperature")
+        value: The value to set
+    """
+    parts = key.split(".")
+    current = data
+    for part in parts[:-1]:
+        if part not in current or not isinstance(current[part], dict):
+            current[part] = {}
+        current = current[part]
+    current[parts[-1]] = value
+
+
+def coerce_value(value: str) -> Any:
+    """Coerce a string value to appropriate Python type.
+
+    Handles: bool, null, int, float, JSON objects/arrays, strings.
+    """
+    lowered = value.lower()
+    if lowered in {"true", "false"}:
+        return lowered == "true"
+    if lowered in {"null", "none"}:
+        return None
+    if _INT_RE.match(value):
+        try:
+            return int(value)
+        except ValueError:
+            pass
+    if _FLOAT_RE.match(value):
+        try:
+            return float(value)
+        except ValueError:
+            pass
+    if value.lstrip().startswith(("{", "[")):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            pass  # Return as string if JSON parsing fails
+    return value
+
+
+def write_config_file(path: Path, data: dict[str, Any]) -> None:
+    """Write config data to a YAML file.
+
+    Creates parent directories if needed.
+
+    Args:
+        path: Path to write to
+        data: Config data to write
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(data, sort_keys=False, default_flow_style=False))
+
+
+def load_or_create_config(path: Path) -> dict[str, Any]:
+    """Load config from path, or return empty dict if not exists."""
+    if path.exists():
+        return load_config_file(path)
+    return {}
