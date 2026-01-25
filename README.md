@@ -4,35 +4,6 @@ CLI wrapper for `rlm` with directory-as-context, JSON-first output, and self-doc
 
 Upstream RLM: https://github.com/alexzhang13/rlm
 
-## Claude Code Plugin
-
-This repo includes a Claude Code plugin with an `rlm` skill. The skill teaches Claude how to use the rlm CLI for code analysis, diff reviews, and codebase exploration.
-
-### Installation
-
-**Claude Code (Interactive)**
-```
-/plugin marketplace add rawwerks/rlm-cli
-/plugin install rlm@rlm-cli
-```
-
-**Claude CLI**
-```bash
-claude plugin marketplace add rawwerks/rlm-cli
-claude plugin install rlm@rlm-cli
-```
-
-### What the skill provides
-
-The `/rlm` skill gives Claude knowledge of:
-- All rlm commands (`ask`, `complete`, `search`, `index`, `doctor`)
-- Input types (files, directories, URLs, stdin, literal text)
-- Common workflows (diff review, codebase analysis, search + analyze)
-- Configuration and environment variables
-- Exit codes for error handling
-
-Once installed, Claude can use rlm to analyze code, review diffs, and explore codebases when you ask it to.
-
 ## Install
 
 ### One-liner (recommended)
@@ -70,6 +41,35 @@ cd rlm-cli
 uv venv
 uv pip install -e .
 ```
+
+## Claude Code Plugin
+
+This repo includes a Claude Code plugin with an `rlm` skill. The skill teaches Claude how to use the rlm CLI for code analysis, diff reviews, and codebase exploration.
+
+### Installation
+
+**Claude Code (Interactive)**
+```
+/plugin marketplace add rawwerks/rlm-cli
+/plugin install rlm@rlm-cli
+```
+
+**Claude CLI**
+```bash
+claude plugin marketplace add rawwerks/rlm-cli
+claude plugin install rlm@rlm-cli
+```
+
+### What the skill provides
+
+The `/rlm` skill gives Claude knowledge of:
+- All rlm commands (`ask`, `complete`, `search`, `index`, `doctor`)
+- Input types (files, directories, URLs, stdin, literal text)
+- Common workflows (diff review, codebase analysis, search + analyze)
+- Configuration and environment variables
+- Exit codes for error handling
+
+Once installed, Claude can use rlm to analyze code, review diffs, and explore codebases when you ask it to.
 
 ## Authentication
 
