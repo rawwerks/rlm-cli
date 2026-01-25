@@ -116,13 +116,24 @@ def build_execution_tree(raw: object, depth: int = 0) -> dict[str, object] | Non
     if isinstance(prompt, str):
         prompt_preview = _truncate(prompt)
     elif isinstance(prompt, dict):
-        prompt_preview = _truncate(str(prompt))
+        # Try to extract meaningful preview from context dict
+        if "query" in prompt:
+            prompt_preview = _truncate(str(prompt["query"]))
+        elif "root" in prompt:
+            prompt_preview = f"[context: {prompt.get('root', 'unknown')}]"
+        else:
+            prompt_preview = _truncate(str(prompt), 60)
     elif isinstance(prompt, list) and prompt:
         # Message list - get last user message content
         for msg in reversed(prompt):
             if isinstance(msg, dict) and msg.get("role") == "user":
                 content = msg.get("content", "")
-                prompt_preview = _truncate(str(content))
+                if isinstance(content, str):
+                    prompt_preview = _truncate(content)
+                elif isinstance(content, dict) and "query" in content:
+                    prompt_preview = _truncate(str(content["query"]))
+                else:
+                    prompt_preview = _truncate(str(content))
                 break
 
     node: dict[str, object] = {
@@ -190,6 +201,78 @@ def _build_iteration_node(iteration: object, num: int, depth: int) -> dict[str, 
         node["sub_calls"] = sub_call_count
 
     return node
+
+
+def render_execution_tree(raw: object) -> str | None:
+    """
+    Render execution tree as ASCII art for terminal display.
+
+    Returns a string like:
+    ┌─ [openai/gpt-4] 2.3s $0.05
+    │  Q: Analyze the codebase...
+    │  A: I'll start by...
+    │
+    └─┬─ [google/gemini] 1.2s $0.02
+      │  Q: What is X?
+      │  A: X is...
+      │
+      └── [openai/gpt-4] 0.5s
+          Q: Details?
+          A: The details...
+    """
+    tree = build_execution_tree(raw)
+    if tree is None:
+        return None
+
+    lines: list[str] = []
+
+    def format_node_header(node: dict[str, object]) -> str:
+        model = node.get("model", "unknown")
+        duration = node.get("duration", 0)
+        cost = node.get("cost")
+        header = f"[{model}] {duration}s"
+        if cost:
+            header += f" ${cost:.4f}"
+        return header
+
+    def render_node(node: dict[str, object], prefix: str, is_last: bool, is_root: bool) -> None:
+        # Determine box drawing characters
+        if is_root:
+            branch = "┌─ "
+            child_prefix = "│  "
+        elif is_last:
+            branch = "└── "
+            child_prefix = "    "
+        else:
+            branch = "├── "
+            child_prefix = "│   "
+
+        # Node header
+        header = format_node_header(node)
+        lines.append(f"{prefix}{branch}{header}")
+
+        # Content prefix for Q/A lines
+        content_prefix = prefix + child_prefix
+
+        # Show prompt/response previews
+        prompt = node.get("prompt_preview", "")
+        response = node.get("response_preview", "")
+        if prompt:
+            lines.append(f"{content_prefix}Q: {prompt}")
+        if response:
+            lines.append(f"{content_prefix}A: {response}")
+
+        # Process children
+        children = node.get("children", []) or []
+        if children:
+            lines.append(content_prefix.rstrip())  # blank line before children
+            for i, child in enumerate(children):
+                if isinstance(child, dict):
+                    is_last_child = i == len(children) - 1
+                    render_node(child, content_prefix, is_last_child, False)
+
+    render_node(tree, "", True, True)
+    return "\n".join(lines)
 
 
 def build_execution_summary(raw: object) -> dict[str, object] | None:

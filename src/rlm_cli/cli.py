@@ -10,7 +10,18 @@ from typing import Any, Iterable
 
 import typer
 
-from .config import DEFAULT_CONFIG, load_effective_config, render_effective_config_text
+from .config import (
+    DEFAULT_CONFIG,
+    coerce_value,
+    get_local_config_path,
+    get_nested_value,
+    get_user_config_path,
+    load_effective_config,
+    load_or_create_config,
+    render_effective_config_text,
+    set_nested_value,
+    write_config_file,
+)
 from .context import WalkOptions, build_context_from_sources
 from .errors import (
     CliError,
@@ -29,6 +40,7 @@ from .output import (
     capture_stdout,
     emit_json,
     emit_text,
+    render_execution_tree,
 )
 from .rlm_adapter import parse_json_args, parse_kv_args, run_completion
 
@@ -1118,6 +1130,12 @@ from rlm_cli.tools_search import exa, web
                 warnings.insert(0, "Stopped early (Ctrl+C) - returning best answer so far")
             _emit_text_output(result.response, output, warnings)
 
+            # Print tree to stderr if requested
+            if show_tree:
+                tree_str = render_execution_tree(result.raw)
+                if tree_str:
+                    _emit_execution_tree(tree_str)
+
             # Print summary to stderr if requested
             if show_summary:
                 summary = build_execution_summary(result.raw)
@@ -1489,6 +1507,15 @@ def _emit_text_output(result_text: str, output: str | None, warnings: list[str])
             typer.echo(f"Warning: {warning}", err=True)
         return
     emit_text(result_text, warnings=warnings)
+
+
+def _emit_execution_tree(tree_str: str) -> None:
+    """Emit execution tree to stderr."""
+    import sys
+
+    sys.stderr.write("\n=== RLM Execution Tree ===\n")
+    sys.stderr.write(tree_str)
+    sys.stderr.write("\n")
 
 
 def _emit_execution_summary(summary: dict[str, object]) -> None:
