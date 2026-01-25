@@ -12,7 +12,7 @@ echo "Installing rlm-cli..."
 
 # Check for required tools
 command -v git >/dev/null 2>&1 || { echo "Error: git is required"; exit 1; }
-command -v python3 >/dev/null 2>&1 || { echo "Error: python3 is required"; exit 1; }
+command -v uv >/dev/null 2>&1 || { echo "Error: uv is required (https://docs.astral.sh/uv/)"; exit 1; }
 
 # Clean up existing installation
 if [ -d "$INSTALL_DIR" ]; then
@@ -24,12 +24,11 @@ fi
 echo "Cloning repository..."
 git clone --recurse-submodules --depth 1 "$REPO" "$INSTALL_DIR"
 
-# Create venv and install
-echo "Creating virtual environment..."
+# Create venv and install with uv
+echo "Installing with uv..."
 cd "$INSTALL_DIR"
-python3 -m venv .venv
-.venv/bin/pip install --upgrade pip -q
-.venv/bin/pip install -e . -q
+uv venv
+uv pip install -e .
 
 # Create bin directory and symlink
 mkdir -p "$BIN_DIR"
