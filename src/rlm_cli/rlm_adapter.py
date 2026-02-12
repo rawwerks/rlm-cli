@@ -220,7 +220,7 @@ def _maybe_logger(log_dir: str | None) -> object | None:
     if not log_dir:
         return None
     try:
-        from rlm import RLMLogger
+        from rlm.logger import RLMLogger
     except Exception:
         return None
     try:
